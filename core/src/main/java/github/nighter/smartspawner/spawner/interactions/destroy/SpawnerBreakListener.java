@@ -12,6 +12,7 @@ import github.nighter.smartspawner.language.MessageService;
 import github.nighter.smartspawner.config.Config;
 import github.nighter.smartspawner.spawner.config.SpawnerSettingsConfig;
 import github.nighter.smartspawner.spawner.item.SpawnerItemFactory;
+import github.nighter.smartspawner.fork.ForkConfig;
 import github.nighter.smartspawner.spawner.utils.SpawnerLocationLockManager;
 import lombok.Getter;
 import org.bukkit.*;
@@ -221,7 +222,8 @@ public class SpawnerBreakListener implements Listener {
             if (world != null) {
                 block.setType(Material.AIR);
 
-                if (hasDropChanceBypass(player) || shouldDropSpawner(getNaturalSpawnerDropChance(entityType))) {
+                if (ForkConfig.get().isVanillaDropAllowed(world)
+                        && (hasDropChanceBypass(player) || shouldDropSpawner(getNaturalSpawnerDropChance(entityType)))) {
                     if (breakConfig.isDirectToInventory()) {
                         giveSpawnersToPlayer(player, 1, spawnerItem);
                         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.5f, 1.2f);

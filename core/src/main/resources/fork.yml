@@ -1,0 +1,21 @@
+# =====================================================================
+#  fork.yml  --  NuviraMC fork settings for SmartSpawner
+# ---------------------------------------------------------------------
+#  Nicht Teil von Upstream-SmartSpawner.
+#  Alles Fork-Spezifische steht hier, damit Upstream-Dateien
+#  (config.yml, language/*.yml, ...) unveraendert bleiben und
+#  `git pull` keine Konflikte erzeugt.
+# =====================================================================
+
+natural_spawner:
+
+  # Begrenzt, in welchen Welten natuerliche (Vanilla-)Spawner beim
+  # Abbau ueberhaupt droppen duerfen.
+  drop_world_filter:
+
+    # false = aus, Plugin verhaelt sich exakt wie Upstream (Drop ueberall).
+    enabled: true
+
+    # Nur in diesen Welten darf gedroppt werden. Gross-/Kleinschreibung egal.
+    worlds:
+      - "Plotwelt"
