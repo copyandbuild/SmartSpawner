@@ -71,7 +71,8 @@ public class SpawnerStackHandler {
         }
 
         try {
-            handleSpawnerStack(player, spawnerData, itemInHand, player.isSneaking());
+            boolean stackAll = player.isSneaking() && Config.get().isSneakStackEnabled();
+            handleSpawnerStack(player, spawnerData, itemInHand, stackAll);
         } finally {
             releaseStackLock(block.getLocation());
             updateLastStackTime(player);
@@ -118,6 +119,12 @@ public class SpawnerStackHandler {
 
         // Both must be item spawners or both must be regular spawners
         if (isItemSpawnerItem != isTargetItemSpawner) {
+            messageService.sendMessage(player, "spawner_different");
+            return false;
+        }
+
+        String handConfigName = SpawnerTypeChecker.getConfigName(itemInHand);
+        if (handConfigName != null && !handConfigName.equals(targetSpawner.getConfigName())) {
             messageService.sendMessage(player, "spawner_different");
             return false;
         }

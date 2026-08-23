@@ -1,6 +1,14 @@
 # Cấu Hình Chính
 
-File `plugins/SmartSpawner/config.yml` điều khiển ngôn ngữ, hành vi spawner, kinh tế, hiệu ứng, ghi log, cơ sở dữ liệu và hiệu năng.
+File `plugins/SmartSpawner/config.yml` điều khiển ngôn ngữ, hành vi spawner, hiệu ứng, cơ sở dữ liệu và hiệu năng.
+
+Hai phần có file riêng. Bán vật phẩm và bảng giá nằm trong `sell_integration.yml`, ghi nhật ký thao tác nằm trong `activity_log.yml`.
+
+Hầu hết tùy chọn áp dụng khi chạy `/ss reload`. Những tùy chọn ghi RESTART chỉ được đọc lúc máy chủ khởi động.
+
+Có thể quản lý bảng loot của mob và Item Spawner ngay trong game. Dùng `/ss edit smartspawner` hoặc
+`/ss edit itemspawner` để chỉnh mục hiện có, và `/ss add smartspawner|itemspawner` để tạo mục mới.
+Xem trang [Lệnh](/vi/docs/commands) để biết cú pháp và quyền tương ứng.
 
 Nhấp vào một tùy chọn hoặc nhóm để xem thông tin chi tiết.
 
@@ -42,13 +50,9 @@ Thư mục ngôn ngữ được tải từ <code>plugins/SmartSpawner/language/<
 Thư mục bố cục GUI trong <code>plugins/SmartSpawner/gui_layouts/</code>. Tùy chọn có sẵn: <code>default</code>, <code>DonutSMP</code>, <code>DonutSMP_v2</code>.
 </ConfigProperty>
 
-<ConfigProperty name="debug" value="false" type="boolean">
-Bật thêm đầu ra console để chẩn đoán. Nên giữ <code>false</code> trên máy chủ production.
-</ConfigProperty>
-
 <ConfigGroup name="spawner_properties">
 <template #info>
-Điều khiển hành vi mặc định của mọi Smart Spawner, trừ khi bị ghi đè bởi cấu hình riêng theo mob.
+Các thiết lập này áp dụng cho mọi Smart Spawner trên máy chủ. Chúng điều khiển tần suất tạo vật phẩm, phạm vi kích hoạt, dung lượng kho, cách xếp chồng và đặt spawner. Mọi spawner dùng chung các giá trị này; không có ghi đè riêng theo mob ở đây. Các giá trị riêng theo mob như XP và bảng vật phẩm được đặt trong <code>spawner_mobs.yml</code>. Xem [Mob Spawners](/vi/docs/spawner-mobs).
 </template>
 
 <ConfigGroup name="default">
@@ -79,6 +83,14 @@ XP tối đa spawner lưu trước khi ngừng tạo thêm.
 
 <ConfigProperty name="max_stack_size" value="10000" type="number">
 Số spawner tối đa có thể xếp trong một block.
+</ConfigProperty>
+
+<ConfigProperty name="sneak_stack" value="true" type="boolean">
+Khi <code>true</code>, khom người lúc phải chuột vào spawner sẽ xếp toàn bộ spawner đang cầm vào chồng cùng lúc. Khi <code>false</code>, mỗi lần bấm chỉ xếp một cái.
+</ConfigProperty>
+
+<ConfigProperty name="sneak_place" value="true" type="boolean">
+Khi <code>true</code>, khom người lúc đặt spawner sẽ đặt cả chồng đang cầm thành một spawner. Khi <code>false</code>, mỗi lần đặt chỉ một cái.
 </ConfigProperty>
 
 <ConfigProperty name="allow_exp_mending" value="true" type="boolean">
@@ -116,7 +128,7 @@ Số điểm độ bền trừ khỏi công cụ khi phá spawner.
 <ConfigProperty name="sneak_break" value="true" type="boolean">
 Khi bật, cúi trong lúc phá một stack sẽ lấy tối đa 64 spawner cùng lúc.<br><br>
 ::: warning Tỷ lệ rơi và phá khi cúi
-Nếu một loại mob có `drop_chance` trong `spawners_settings.yml`, không thể phá theo stack trừ khi người chơi có `smartspawner.break.bypassdropchance`.
+Nếu một loại mob có `drop_chance` trong `spawner_mobs.yml`, không thể phá theo stack trừ khi người chơi có `smartspawner.break.bypassdropchance`.
 :::
 </ConfigProperty>
 
@@ -172,60 +184,6 @@ Bảo vệ block spawner tự nhiên khỏi vụ nổ.
 
 </ConfigGroup>
 
-<ConfigGroup name="sell_integration">
-<template #info>
-Cấu hình kinh tế và cửa hàng cho nút bán trong kho spawner.
-</template>
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Bật bán vật phẩm trong kho. Đặt <code>false</code> để tắt toàn bộ tính năng bán.
-</ConfigProperty>
-
-<ConfigProperty name="currency" value="VAULT" type="string">
-Backend kinh tế: <code>VAULT</code> hoặc <code>EXCELLENTECONOMY</code>.
-</ConfigProperty>
-
-<ConfigProperty name="excellenteconomy_currency" value="coins" type="string">
-Tên currency ExcellentEconomy, chỉ dùng khi <code>currency</code> là <code>EXCELLENTECONOMY</code>.
-</ConfigProperty>
-
-<ConfigProperty name="price_source_mode" value="SHOP_PRIORITY" type="string">
-Quyết định nguồn giá bán.<br><br>
-
-| Chế độ | Hành vi |
-|--------|---------|
-| <code>SHOP_ONLY</code> | Chỉ dùng giá plugin cửa hàng |
-| <code>SHOP_PRIORITY</code> | Giá cửa hàng trước, giá tùy chỉnh dự phòng |
-| <code>CUSTOM_ONLY</code> | Chỉ dùng <code>item_prices.yml</code> |
-| <code>CUSTOM_PRIORITY</code> | Giá tùy chỉnh trước, giá cửa hàng dự phòng |
-
-</ConfigProperty>
-
-<ConfigGroup name="shop_integration">
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Bật tra cứu giá từ plugin cửa hàng.
-</ConfigProperty>
-
-<ConfigProperty name="preferred_plugin" value="auto" type="string">
-Plugin cửa hàng ưu tiên: <code>auto</code>, <code>EconomyShopGUI</code>, <code>EconomyShopGUI-Premium</code>, <code>ShopGUIPlus</code> hoặc <code>zShop</code>.
-</ConfigProperty>
-
-</ConfigGroup>
-
-<ConfigGroup name="custom_prices">
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Bật giá tùy chỉnh từ <code>item_prices.yml</code>.
-</ConfigProperty>
-
-<ConfigProperty name="default_price" value="1.0" type="number">
-Giá dự phòng cho vật phẩm chưa cấu hình. Đặt <code>0.0</code> để không cho bán.
-</ConfigProperty>
-
-</ConfigGroup>
-</ConfigGroup>
-
 <ConfigGroup name="hopper">
 <template #info>
 Điều khiển tự chuyển vật phẩm từ kho spawner qua hopper bên dưới.
@@ -241,14 +199,6 @@ Khoảng thời gian giữa các lần kiểm tra chuyển vật phẩm.
 
 <ConfigProperty name="stack_per_transfer" value="5" type="number">
 Số stack được chuyển mỗi chu kỳ, tối đa 5.
-</ConfigProperty>
-
-</ConfigGroup>
-
-<ConfigGroup name="bedrock_support">
-
-<ConfigProperty name="enable_formui" value="true" type="boolean">
-Hiển thị form thân thiện với di động cho người chơi Bedrock qua Floodgate/Geyser thay vì chest GUI.
 </ConfigProperty>
 
 </ConfigGroup>
@@ -282,46 +232,73 @@ Hiệu ứng particle tùy chọn cho sự kiện spawner.
 
 </ConfigGroup>
 
-<ConfigGroup name="logging">
-<template #info>
-Ghi thao tác spawner vào file log xoay vòng để kiểm tra và chẩn đoán.
-</template>
-
-<ConfigProperty name="enabled" value="true" type="boolean">Bật ghi log file.</ConfigProperty>
-<ConfigProperty name="json_format" value="false" type="boolean">Ghi JSON khi bật, ngược lại dùng văn bản dễ đọc.</ConfigProperty>
-<ConfigProperty name="console_output" value="false" type="boolean">In thêm bản ghi ra console.</ConfigProperty>
-<ConfigProperty name="max_log_files" value="10" type="number">Số file log xoay vòng được giữ.</ConfigProperty>
-<ConfigProperty name="max_log_size_mb" value="10" type="number">Dung lượng tối đa mỗi file trước khi xoay.</ConfigProperty>
-<ConfigProperty name="log_all_events" value="false" type="boolean">Ghi mọi sự kiện và bỏ qua <code>logged_events</code>.</ConfigProperty>
-
-<ConfigProperty name="logged_events" :value="['SPAWNER_PLACE', 'SPAWNER_BREAK', 'SPAWNER_STACK_HAND', 'SPAWNER_SELL_ALL', 'COMMAND_EXECUTE_PLAYER']" type="list">
-Các sự kiện được ghi khi <code>log_all_events</code> là <code>false</code>.
-</ConfigProperty>
-
-</ConfigGroup>
-
 <ConfigGroup name="database">
 <template #info>
-Cấu hình nơi lưu dữ liệu spawner.
+Cấu hình nơi lưu dữ liệu spawner. Xem <a href="/vi/docs/database-support">Hỗ trợ cơ sở dữ liệu</a> để có hướng dẫn đầy đủ.
+
+::: warning RESTART
+Mọi tùy chọn trong mục này, trừ <code>autosave-interval</code>, chỉ được đọc lúc máy chủ khởi động. <code>/ss reload</code> không áp dụng chúng.
+:::
 </template>
 
-<ConfigProperty name="mode" value="YAML" type="string">
-Backend lưu trữ: <code>YAML</code>, <code>SQLITE</code> hoặc <code>MYSQL</code>.
+<ConfigProperty name="type" value="SQLITE" type="string">
+Backend lưu trữ: <code>SQLITE</code> hoặc <code>MYSQL</code>. Cấu hình còn để <code>YAML</code> sẽ tự chuyển sang <code>SQLITE</code> trong lần khởi động kế tiếp và nhập file cũ một lần.
 </ConfigProperty>
 
-<ConfigProperty name="server_name" value="server1" type="string">
+<ConfigProperty name="table-prefix" value="sspawner_" type="string">
+Tiền tố cho hai bảng plugin tạo ra là <code>sspawner_data</code> và <code>sspawner_schema_meta</code>. Chỉ giữ lại chữ cái, chữ số và dấu gạch dưới, ký tự khác bị loại bỏ. Đổi khi có plugin khác đã dùng tên đó trong cùng cơ sở dữ liệu, hoặc để tách hai bản cài SmartSpawner trong cùng một cơ sở dữ liệu MySQL.
+
+Bảng đang có sẽ được đổi tên tự động khi giá trị này thay đổi.
+</ConfigProperty>
+
+<ConfigProperty name="autosave-interval" value="3m" type="string">
+Khoảng thời gian giữa hai lần ghi thay đổi spawner xuống cơ sở dữ liệu. Dùng định dạng thời gian ở trên, tối thiểu <code>30s</code>. Dữ liệu cũng được lưu khi thế giới lưu và khi máy chủ tắt, nên đây là lớp bảo vệ chứ không phải lần lưu duy nhất.
+
+Tăng lên trên máy chủ đông người để giảm ghi đĩa. Giảm xuống để thu hẹp lượng hoạt động gần nhất có thể mất nếu máy chủ sập. Đây là tùy chọn duy nhất trong mục này mà <code>/ss reload</code> áp dụng được.
+</ConfigProperty>
+
+<ConfigProperty name="sqlite-file" value="spawners.db" type="string">
+Tên file cơ sở dữ liệu, nằm trong <code>plugins/SmartSpawner/</code>. Chỉ dùng ở chế độ <code>SQLITE</code>.
+</ConfigProperty>
+
+<ConfigProperty name="host" value="localhost" type="string">
+Địa chỉ máy chủ cơ sở dữ liệu. Chỉ dùng ở chế độ <code>MYSQL</code>, cùng với năm tùy chọn bên dưới.
+</ConfigProperty>
+
+<ConfigProperty name="port" value="3306" type="number">
+Cổng máy chủ cơ sở dữ liệu.
+</ConfigProperty>
+
+<ConfigProperty name="database" value="smartspawner" type="string">
+Tên cơ sở dữ liệu MySQL hoặc MariaDB cần dùng.
+</ConfigProperty>
+
+<ConfigProperty name="username" value="root" type="string">
+Người dùng cơ sở dữ liệu.
+</ConfigProperty>
+
+<ConfigProperty name="password" value="" type="string">
+Mật khẩu của người dùng đó.
+</ConfigProperty>
+
+<ConfigProperty name="pool-size" value="10" type="number">
+Số kết nối tối đa plugin được phép mở cùng lúc. Giá trị mặc định phù hợp với hầu hết máy chủ. SQLite chạy chế độ WAL nên việc đọc không bị chặn trong lúc lưu.
+</ConfigProperty>
+
+<ConfigProperty name="server-name" value="server1" type="string">
 Tên máy chủ duy nhất cho mô hình MySQL liên máy chủ.
 </ConfigProperty>
 
-<ConfigProperty name="sync_across_servers" value="false" type="boolean">
-Hiển thị trang chọn máy chủ trong <code>/ss list</code> để xem spawner từ mọi máy chủ dùng chung MySQL.
+<ConfigProperty name="sync-across-servers" value="false" type="boolean">
+Hiển thị trang chọn máy chủ trong <code>/ss list</code> để xem spawner từ mọi máy chủ dùng chung MySQL. Chỉ có ở chế độ <code>MYSQL</code>.
 </ConfigProperty>
 
-<ConfigProperty name="migrate_from_local" value="true" type="boolean">
-Tự chuyển dữ liệu local khi đổi chế độ. File đã chuyển được thêm hậu tố <code>.migrated</code>.
+<ConfigProperty name="migrate-from-local" value="true" type="boolean">
+Tự chuyển dữ liệu local khi đổi chế độ. File đã chuyển được thêm hậu tố <code>.migrated</code> để không bị nhập hai lần.
 </ConfigProperty>
 
 </ConfigGroup>
+
 
 <ConfigGroup name="performance">
 <template #info>
@@ -345,28 +322,3 @@ Ngưỡng bắt đầu xấp xỉ khi <code>approximate_loot</code> được b�
 </ConfigGroup>
 
 </div>
-
-## Các Sự Kiện Log
-
-| Sự kiện | Mô tả |
-|---------|-------|
-| `SPAWNER_PLACE` | Người chơi đặt spawner |
-| `SPAWNER_BREAK` | Người chơi phá spawner |
-| `SPAWNER_EXPLODE` | Spawner bị phá bởi vụ nổ |
-| `SPAWNER_STACK_HAND` | Xếp chồng bằng tay |
-| `SPAWNER_STACK_GUI` | Xếp chồng qua GUI |
-| `SPAWNER_DESTACK_GUI` | Rút stack qua GUI |
-| `SPAWNER_GUI_OPEN` | Mở GUI chính |
-| `SPAWNER_STORAGE_OPEN` | Mở GUI kho |
-| `SPAWNER_STACKER_OPEN` | Mở GUI stacker |
-| `SPAWNER_EXP_CLAIM` | Nhận XP |
-| `SPAWNER_SELL_ALL` | Bán vật phẩm trong kho |
-| `SPAWNER_ITEM_TAKE_ALL` | Lấy toàn bộ vật phẩm |
-| `SPAWNER_ITEM_DROP` | Thả vật phẩm bằng phím drop |
-| `SPAWNER_ITEMS_SORT` | Sắp xếp vật phẩm |
-| `SPAWNER_ITEM_FILTER` | Bật/tắt bộ lọc |
-| `SPAWNER_DROP_PAGE_ITEMS` | Thả mọi vật phẩm ở trang hiện tại |
-| `SPAWNER_EGG_CHANGE` | Đổi mob bằng spawn egg |
-| `COMMAND_EXECUTE_PLAYER` | Người chơi chạy lệnh |
-| `COMMAND_EXECUTE_CONSOLE` | Console chạy lệnh |
-| `COMMAND_EXECUTE_RCON` | RCON chạy lệnh |

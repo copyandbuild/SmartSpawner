@@ -13,6 +13,8 @@ import github.nighter.smartspawner.language.section.ItemLanguageSection;
 import github.nighter.smartspawner.language.section.MessageLanguageSection;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.entity.EntityType;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -251,6 +253,43 @@ public class LanguageManager {
             String chance
     ) {
         return guiLanguage.translatableLootLine(templateKey, material, amount, chance);
+    }
+
+    /**
+     * As above, but names the item from a real {@link ItemStack} so its effective name is used (a tipped
+     * arrow shows "Arrow of Strength", not "Tipped Arrow"). Falls back to the material name when the item
+     * is null.
+     */
+    public Component buildTranslatableGuiLootLine(
+            String templateKey,
+            ItemStack item,
+            String amount,
+            String chance
+    ) {
+        return guiLanguage.translatableLootLine(templateKey, getItemDisplayName(item), amount, chance);
+    }
+
+    public Component buildTranslatableLootLine(
+            String templateKey,
+            ItemStack item,
+            String amount,
+            String chance
+    ) {
+        return items.translatableLootLine(templateKey, getItemDisplayName(item), amount, chance);
+    }
+
+    /**
+     * The name to show for this item: its custom name if it has one, otherwise the effective name the
+     * client would display (which keeps component-specific names like potion effects).
+     */
+    public Component getItemDisplayName(ItemStack item) {
+        if (item == null) return Component.empty();
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null && meta.hasDisplayName()) {
+            Component custom = meta.displayName();
+            if (custom != null) return custom;
+        }
+        return item.effectiveName();
     }
 
     public List<Component> buildItemLoreAsComponents(

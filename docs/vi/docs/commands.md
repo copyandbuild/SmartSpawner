@@ -20,21 +20,21 @@ Mọi lệnh cần quyền gốc `smartspawner.command.use` cùng node cụ th�
 
 ## Lệnh Trao Spawner
 
-### /ss give spawner
+### /ss give smart_spawner
 
-<CommandRow commands="/ss give spawner &lt;player&gt; &lt;type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; smart_spawner &lt;name&gt; [amount]" permission="smartspawner.command.give">
 
 Trao Smart Spawner cho người chơi.
 
-- `<player>`: Người chơi đích hoặc selector (`@p`, `@a`, v.v.)
-- `<type>`: Loại mob, ví dụ `zombie`, `skeleton`, `blaze`
+- `<player>`: Người chơi đích. Chỉ gợi ý tên người chơi đang online.
+- `<name>`: Tên mục cấp cao nhất trong `spawner_mobs.yml`, ví dụ `zombie_spawner`
 - `[amount]`: Số lượng tùy chọn từ 1–6400, mặc định 1
 
 </CommandRow>
 
 ### /ss give vanilla_spawner
 
-<CommandRow commands="/ss give vanilla_spawner &lt;player&gt; &lt;type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; vanilla_spawner &lt;type&gt; [amount]" permission="smartspawner.command.give">
 
 Trao spawner Minecraft vanilla. Không GUI, không xếp chồng; hoạt động như block spawner mặc định đặt từ chế độ sáng tạo.
 
@@ -42,11 +42,11 @@ Trao spawner Minecraft vanilla. Không GUI, không xếp chồng; hoạt động
 
 ### /ss give item_spawner
 
-<CommandRow commands="/ss give item_spawner &lt;player&gt; &lt;item_type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; item_spawner &lt;name&gt; [amount]" permission="smartspawner.command.give">
 
 Trao Item Spawner cho người chơi.
 
-- `<item_type>`: Tên material, ví dụ `DIAMOND`, `EMERALD`, `NETHERITE_INGOT`
+- `<name>`: Tên mục cấp cao nhất trong `spawner_items.yml`, ví dụ `diamond_spawner`
 
 </CommandRow>
 
@@ -56,7 +56,7 @@ Trao Item Spawner cho người chơi.
 
 <CommandRow commands="/ss reload" permission="smartspawner.command.reload">
 
-Tải lại toàn bộ cấu hình mà không cần khởi động lại máy chủ. Áp dụng thay đổi trong `config.yml`, `spawners_settings.yml`, `item_spawners_settings.yml`, `item_prices.yml`, file ngôn ngữ và các hook tích hợp.
+Tải lại toàn bộ cấu hình mà không cần khởi động lại máy chủ. Áp dụng thay đổi trong `config.yml`, `spawner_mobs.yml`, `spawner_items.yml`, `sell_integration.yml`, `activity_log.yml`, file ngôn ngữ và các hook tích hợp. Các tùy chọn ghi RESTART trong `config.yml` không được áp dụng.
 
 </CommandRow>
 

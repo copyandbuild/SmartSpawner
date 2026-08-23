@@ -20,21 +20,21 @@ All commands require `smartspawner.command.use` as a base permission, plus the s
 
 ## Give Commands
 
-### /ss give spawner
+### /ss give smart_spawner
 
-<CommandRow commands="/ss give spawner &lt;player&gt; &lt;type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; smart_spawner &lt;name&gt; [amount]" permission="smartspawner.command.give">
 
 Give Smart Spawners to a player.
 
-- `<player>`: Target player or selector (`@p`, `@a`, etc.)
-- `<type>`: Mob type (e.g. `zombie`, `skeleton`, `blaze`)
+- `<player>`: Target player. Only online player names are suggested.
+- `<name>`: Top-level entry name from `spawner_mobs.yml` (e.g. `zombie_spawner`)
 - `[amount]`: Optional quantity 1–6400, default: 1
 
 </CommandRow>
 
 ### /ss give vanilla_spawner
 
-<CommandRow commands="/ss give vanilla_spawner &lt;player&gt; &lt;type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; vanilla_spawner &lt;type&gt; [amount]" permission="smartspawner.command.give">
 
 Give vanilla Minecraft spawners to a player. No GUI, no stacking. Works exactly like a default spawner block placed from creative mode.
 
@@ -42,11 +42,11 @@ Give vanilla Minecraft spawners to a player. No GUI, no stacking. Works exactly 
 
 ### /ss give item_spawner
 
-<CommandRow commands="/ss give item_spawner &lt;player&gt; &lt;item_type&gt; [amount]" permission="smartspawner.command.give">
+<CommandRow commands="/ss give &lt;player&gt; item_spawner &lt;name&gt; [amount]" permission="smartspawner.command.give">
 
 Give Item Spawners to a player.
 
-- `<item_type>`: Material name (e.g. `DIAMOND`, `EMERALD`, `NETHERITE_INGOT`)
+- `<name>`: Top-level entry name from `spawner_items.yml` (e.g. `diamond_spawner`)
 
 </CommandRow>
 
@@ -56,7 +56,7 @@ Give Item Spawners to a player.
 
 <CommandRow commands="/ss reload" permission="smartspawner.command.reload">
 
-Reload all configuration files without restarting the server. Applies changes to `config.yml`, `spawners_settings.yml`, `item_spawners_settings.yml`, `item_prices.yml`, language files, and hook integrations.
+Reload all configuration files without restarting the server. Applies changes to `config.yml`, `spawner_mobs.yml`, `spawner_items.yml`, `sell_integration.yml`, `activity_log.yml`, language files, and hook integrations. Settings marked RESTART in `config.yml` are not applied.
 
 </CommandRow>
 

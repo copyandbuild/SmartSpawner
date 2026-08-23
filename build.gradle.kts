@@ -2,7 +2,15 @@ plugins {
     java
     `java-library`
     `maven-publish`
-    id("com.gradleup.shadow") version "9.6.1" apply false
+    alias(libs.plugins.shadow) apply false
+}
+
+val targetJavaVersion = 25
+
+// Forced rather than constrained: only a forced version beats the `strictly` constraints
+// WorldEdit and PlotSquared declare.
+val serverProvided = libs.bundles.serverProvided.get().map {
+    "${it.module.group}:${it.module.name}:${it.versionConstraint.requiredVersion}"
 }
 
 allprojects {
@@ -10,7 +18,7 @@ allprojects {
     apply(plugin = "maven-publish")
 
     group = "github.nighter"
-    version = "1.7.1.2-DEV"
+    version = "1.8.0"
 
     repositories {
         mavenCentral()
@@ -21,10 +29,6 @@ allprojects {
         maven {
             name = "sonatype-public"
             url = uri("https://oss.sonatype.org/content/groups/public/")
-        }
-        maven {
-            name = "opencollabRepositoryMain"
-            url = uri("https://repo.opencollab.dev/main")
         }
         maven {
             name = "jitpack"
@@ -106,19 +110,13 @@ allprojects {
             }
         }
     }
-}
 
-subprojects {
-    apply(plugin = "java-library")
-
-    java {
-        withJavadocJar()
-        withSourcesJar()
+    // Compile, runtime and their test counterparts. `shade` is left unmatched so the shaded jar
+    // packages exactly what is declared.
+    configurations.matching { it.name.lowercase().endsWith("classpath") }.configureEach {
+        resolutionStrategy.force(*serverProvided.toTypedArray())
     }
-}
 
-val targetJavaVersion = 25
-allprojects {
     java {
         val javaVersion = JavaVersion.toVersion(targetJavaVersion)
         sourceCompatibility = javaVersion
@@ -130,8 +128,15 @@ allprojects {
 
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = "UTF-8"
-        if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible) {
-            options.release.set(targetJavaVersion)
-        }
+        options.release.set(targetJavaVersion)
+    }
+}
+
+subprojects {
+    apply(plugin = "java-library")
+
+    java {
+        withJavadocJar()
+        withSourcesJar()
     }
 }

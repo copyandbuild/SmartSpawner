@@ -1,7 +1,6 @@
 package github.nighter.smartspawner.spawner.config;
 
 import github.nighter.smartspawner.SmartSpawner;
-import github.nighter.smartspawner.hooks.economy.ItemPriceManager;
 import github.nighter.smartspawner.spawner.lootgen.loot.EntityLootConfig;
 import github.nighter.smartspawner.spawner.lootgen.loot.LootItem;
 import github.nighter.smartspawner.updates.YamlMigrator;
@@ -10,7 +9,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.EntityType;
-import org.bukkit.potion.PotionType;
+import org.bukkit.entity.EntitySnapshot;
 
 import java.io.File;
 import java.util.*;
@@ -24,22 +23,33 @@ import java.util.concurrent.ConcurrentHashMap;
  * preserved.</p>
  */
 public class SpawnerSettingsConfig {
-    private static final String RESOURCE = "spawners_settings.yml";
+    private static final String RESOURCE = "spawner_mobs.yml";
+    /** Replaced by {@link #RESOURCE} in 1.8.0. Never read, only reported once. */
+    private static final String LEGACY_RESOURCE = "spawners_settings.yml";
 
     private final SmartSpawner plugin;
     private FileConfiguration config;
     private final File configFile;
 
+    /**
+     * Shown when a mob names no head of its own, or names one that does not exist. Not a config key:
+     * it is only ever a fallback, so a server owner has nothing useful to change here.
+     */
+    private static final Material FALLBACK_HEAD = Material.SPAWNER;
+
     // Mob head data
-    private Material defaultMaterial;
     private final Map<EntityType, MobHeadData> mobHeadMap = new EnumMap<>(EntityType.class);
 
     // Loot data
     private final Map<String, EntityLootConfig> entityLootConfigs = new ConcurrentHashMap<>();
-    private final Set<Material> loadedMaterials = new HashSet<>();
 
     // Spawner item drop chance when the spawner block is broken
     private final Map<EntityType, Double> spawnerDropChances = new EnumMap<>(EntityType.class);
+    private final Map<String, Double> namedSpawnerDropChances = new HashMap<>();
+    private final Map<EntityType, EntitySnapshot> entityDisplaySnapshots = new EnumMap<>(EntityType.class);
+    private final Map<String, MobDefinition> definitionsByName = new HashMap<>();
+    private final Map<String, EntitySnapshot> snapshotsByName = new HashMap<>();
+    private final Map<EntityType, MobDefinition> defaultDefinitionsByEntity = new EnumMap<>(EntityType.class);
 
     public SpawnerSettingsConfig(SmartSpawner plugin) {
         this.plugin = plugin;
@@ -50,12 +60,19 @@ public class SpawnerSettingsConfig {
      * Load or create the spawners settings configuration.
      */
     public void load() {
+        boolean firstRun = !configFile.exists();
+
         // Creates the file if missing and tops up any keys added by a plugin update. A mob's loot
         // section is left alone once the user has one: those entries are a list they curate, so
-        // topping it up would resurrect drops they deliberately deleted on every startup.
+        // topping it up would resurrect drops they deleted and duplicate any entry the shipped file
+        // has since renamed.
         YamlMigrator.migrate(configFile, plugin.getResource(RESOURCE), List.of(), null, true,
                 YamlMigrator.OwnedSection.curated((defaults, path) -> path.endsWith(".loot")),
                 plugin.getLogger());
+
+        if (firstRun) {
+            SupersededConfigNotice.warn(plugin, RESOURCE, LEGACY_RESOURCE);
+        }
 
         config = YamlConfiguration.loadConfiguration(configFile);
         parseConfig();
@@ -67,48 +84,84 @@ public class SpawnerSettingsConfig {
     private void parseConfig() {
         mobHeadMap.clear();
         entityLootConfigs.clear();
-        loadedMaterials.clear();
         spawnerDropChances.clear();
-
-        // Get default material
-        String defaultMaterialName = config.getString("default_material", "SPAWNER");
-        try {
-            defaultMaterial = Material.valueOf(defaultMaterialName.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            plugin.getLogger().warning("Invalid default_material in spawners_settings.yml: " + defaultMaterialName + ", using SPAWNER");
-            defaultMaterial = Material.SPAWNER;
-        }
+        namedSpawnerDropChances.clear();
+        entityDisplaySnapshots.clear();
+        definitionsByName.clear();
+        snapshotsByName.clear();
+        defaultDefinitionsByEntity.clear();
 
         // Parse each mob's configuration
-        for (String entityName : config.getKeys(false)) {
-            // Skip special keys
-            if (entityName.equals("default_material")) {
-                continue;
-            }
+        for (String configName : config.getKeys(false)) {
+            // Anything that is not a section is a stray scalar, not an entry.
+            ConfigurationSection entitySection = config.getConfigurationSection(configName);
+            if (entitySection == null) continue;
 
             // Validate entity type
             EntityType entityType;
             try {
-                entityType = EntityType.valueOf(entityName.toUpperCase());
+                String entityName = entitySection.getString("entity", configName);
+                entityType = EntityType.valueOf(entityName == null ? "" : entityName.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
-                plugin.getLogger().warning("Entity type '" + entityName + "' is invalid or not available in server version " + plugin.getServer().getBukkitVersion());
+                plugin.getLogger().warning("Entity for '" + configName + "' is invalid or missing in " + RESOURCE);
                 continue;
             }
 
-            ConfigurationSection entitySection = config.getConfigurationSection(entityName);
-            if (entitySection == null) continue;
+            String normalizedName = entitySection.contains("entity")
+                    ? SpawnerConfigName.normalize(configName)
+                    : SpawnerConfigName.defaultName(entityType.name());
+            if (normalizedName.isEmpty() || definitionsByName.containsKey(normalizedName)) {
+                plugin.getLogger().warning("Duplicate or invalid spawner name '" + configName + "' in " + RESOURCE);
+                continue;
+            }
 
             // Parse head texture data
             parseHeadTexture(entityType, entitySection);
+            EntitySnapshot snapshot = parseEntityDisplay(entityType, entitySection);
 
             // Parse loot data
-            parseLootData(entityName, entitySection);
+            parseLootData(normalizedName, entitySection);
 
-            parseSpawnerDropChance(entityType, entitySection);
+            parseSpawnerDropChance(normalizedName, entityType, entitySection);
+            MobDefinition definition = new MobDefinition(normalizedName, entityType,
+                    entityLootConfigs.get(normalizedName));
+            definitionsByName.put(normalizedName, definition);
+            if (snapshot != null) {
+                snapshotsByName.put(normalizedName, snapshot);
+                entityDisplaySnapshots.putIfAbsent(entityType, snapshot);
+            }
+            defaultDefinitionsByEntity.putIfAbsent(entityType, definition);
         }
     }
 
-    private void parseSpawnerDropChance(EntityType entityType, ConfigurationSection entitySection) {
+    private EntitySnapshot parseEntityDisplay(EntityType entityType, ConfigurationSection entitySection) {
+        String nbt = entitySection.getString("nbt_data");
+        if (nbt == null || nbt.isBlank()) {
+            return null;
+        }
+
+        String trimmed = nbt.trim();
+        if (trimmed.length() < 2 || trimmed.charAt(0) != '{' || trimmed.charAt(trimmed.length() - 1) != '}') {
+            plugin.getLogger().warning("Invalid nbt_data for " + entityType.name() + ": expected an SNBT compound");
+            return null;
+        }
+
+        String body = trimmed.substring(1, trimmed.length() - 1).trim();
+        String fullNbt = "{id:\"" + entityType.getKey().asString() + "\""
+                + (body.isEmpty() ? "" : "," + body) + "}";
+        try {
+            EntitySnapshot snapshot = plugin.getServer().getEntityFactory().createEntitySnapshot(fullNbt);
+            if (snapshot.getEntityType() == entityType) {
+                return snapshot;
+            }
+        } catch (IllegalArgumentException e) {
+            plugin.getLogger().warning("Invalid nbt_data for " + entityType.name() + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    private void parseSpawnerDropChance(String configName, EntityType entityType,
+                                        ConfigurationSection entitySection) {
         if (!entitySection.contains("drop_chance")) {
             return;
         }
@@ -116,24 +169,25 @@ public class SpawnerSettingsConfig {
         double dropChance = entitySection.getDouble("drop_chance", 100.0);
         if (dropChance < 0.0 || dropChance > 100.0) {
             plugin.getLogger().warning("Invalid drop_chance for " + entityType.name() +
-                    " in spawners_settings.yml. Value must be between 0.0 and 100.0; using 100.0");
+                    " in spawner_mobs.yml. Value must be between 0.0 and 100.0; using 100.0");
             dropChance = 100.0;
         }
 
-        spawnerDropChances.put(entityType, dropChance);
+        spawnerDropChances.putIfAbsent(entityType, dropChance);
+        namedSpawnerDropChances.put(configName, dropChance);
     }
 
     /**
      * Parse head texture configuration for an entity
      */
     private void parseHeadTexture(EntityType entityType, ConfigurationSection entitySection) {
-        ConfigurationSection headSection = entitySection.getConfigurationSection("head_texture");
+        ConfigurationSection headSection = entitySection.getConfigurationSection("mob_head");
         if (headSection == null) {
             return;
         }
 
-        String materialName = headSection.getString("material", "SPAWNER");
-        String customTexture = headSection.getString("custom_texture");
+        String materialName = headSection.getString("item", "SPAWNER");
+        String customTexture = headSection.getString("hash_texture");
 
         // Validate material
         Material material;
@@ -141,15 +195,15 @@ public class SpawnerSettingsConfig {
             material = Material.valueOf(materialName.toUpperCase());
             if (!material.isItem()) {
                 plugin.getLogger().warning("Material " + materialName + " for " + entityType + " is not an item, using default");
-                material = defaultMaterial;
+                material = FALLBACK_HEAD;
             }
         } catch (IllegalArgumentException e) {
             plugin.getLogger().warning("Invalid material " + materialName + " for " + entityType + ", using default");
-            material = defaultMaterial;
+            material = FALLBACK_HEAD;
         }
 
         // Store mob head data
-        mobHeadMap.put(entityType, new MobHeadData(material, customTexture));
+        mobHeadMap.putIfAbsent(entityType, new MobHeadData(material, customTexture));
     }
 
     /**
@@ -159,69 +213,17 @@ public class SpawnerSettingsConfig {
         int experience = entitySection.getInt("experience", 0);
         List<LootItem> items = new ArrayList<>();
 
-        // Cache price manager reference for better performance
-        ItemPriceManager priceManager = plugin.getItemPriceManager();
-
         ConfigurationSection lootSection = entitySection.getConfigurationSection("loot");
         if (lootSection != null) {
             for (String itemKey : lootSection.getKeys(false)) {
                 ConfigurationSection itemSection = lootSection.getConfigurationSection(itemKey);
                 if (itemSection == null) continue;
 
-                try {
-                    // Get the material
-                    Material material;
-                    try {
-                        material = Material.valueOf(itemKey.toUpperCase());
-                    } catch (IllegalArgumentException e) {
-                        material = null;
-                    }
-
-                    if (material == null) {
-                        plugin.getLogger().warning("Material '" + itemKey + "' is not available in server version " +
-                                plugin.getServer().getBukkitVersion() + " - skipping for entity " + entityName);
-                        continue;
-                    }
-
-                    loadedMaterials.add(material);
-
-                    String[] amounts = itemSection.getString("amount", "1-1").split("-");
-                    int minAmount = Integer.parseInt(amounts[0]);
-                    int maxAmount = Integer.parseInt(amounts.length > 1 ? amounts[1] : amounts[0]);
-                    double chance = itemSection.getDouble("chance", 100.0);
-
-                    double sellPrice = 0.0;
-                    if (priceManager != null) {
-                        sellPrice = priceManager.getPrice(material);
-                    }
-
-                    Integer minDurability = null;
-                    Integer maxDurability = null;
-                    if (itemSection.contains("durability")) {
-                        String[] durabilities = itemSection.getString("durability").split("-");
-                        minDurability = Integer.parseInt(durabilities[0]);
-                        maxDurability = Integer.parseInt(durabilities.length > 1 ? durabilities[1] : durabilities[0]);
-                    }
-
-                    PotionType potionType = null;
-                    if (material == Material.TIPPED_ARROW && itemSection.contains("potion_type")) {
-                        String potionTypeName = itemSection.getString("potion_type");
-                        if (potionTypeName != null) {
-                            try {
-                                potionType = PotionType.valueOf(potionTypeName.toUpperCase());
-                            } catch (IllegalArgumentException e) {
-                                plugin.getLogger().warning("Invalid potion type '" + potionTypeName +
-                                        "' for entity " + entityName);
-                                continue;
-                            }
-                        }
-                    }
-
-                    items.add(new LootItem(material, minAmount, maxAmount, chance,
-                            minDurability, maxDurability, potionType, sellPrice));
-
-                } catch (Exception e) {
-                    plugin.getLogger().warning("Error processing material '" + itemKey + "' for entity " + entityName + ": " + e.getMessage());
+                LootItem lootItem = LootEntryParser.parse(
+                        itemSection, itemKey, plugin.getItemPriceManager(), plugin.getLogger(),
+                        "entity " + entityName);
+                if (lootItem != null) {
+                    items.add(lootItem);
                 }
             }
         }
@@ -236,7 +238,7 @@ public class SpawnerSettingsConfig {
      */
     public Material getMaterial(EntityType entityType) {
         MobHeadData data = mobHeadMap.get(entityType);
-        return data != null ? data.material : defaultMaterial;
+        return data != null ? data.material : FALLBACK_HEAD;
     }
 
     /**
@@ -264,7 +266,8 @@ public class SpawnerSettingsConfig {
         if (entityType == null || entityType == EntityType.UNKNOWN) {
             return null;
         }
-        return entityLootConfigs.get(entityType.name().toLowerCase());
+        MobDefinition definition = defaultDefinitionsByEntity.get(entityType);
+        return definition == null ? null : definition.lootConfig();
     }
 
     /**
@@ -284,12 +287,38 @@ public class SpawnerSettingsConfig {
         return entityType != null && entityType != EntityType.UNKNOWN && spawnerDropChances.containsKey(entityType);
     }
 
-    /**
-     * Get all loaded materials
-     */
-    public Set<Material> getLoadedMaterials() {
-        return new HashSet<>(loadedMaterials);
+    public double getSpawnerDropChance(String configName, EntityType fallback) {
+        return namedSpawnerDropChances.getOrDefault(SpawnerConfigName.normalize(configName),
+                getSpawnerDropChance(fallback));
     }
+
+    public boolean hasSpawnerDropChance(String configName) {
+        return namedSpawnerDropChances.containsKey(SpawnerConfigName.normalize(configName));
+    }
+
+    public EntitySnapshot getEntityDisplaySnapshot(EntityType entityType) {
+        return entityDisplaySnapshots.get(entityType);
+    }
+
+    public EntitySnapshot getEntityDisplaySnapshot(String configName, EntityType fallback) {
+        String normalized = SpawnerConfigName.normalize(configName);
+        if (definitionsByName.containsKey(normalized)) return snapshotsByName.get(normalized);
+        return entityDisplaySnapshots.get(fallback);
+    }
+
+    public MobDefinition getDefinition(String name) {
+        return definitionsByName.get(SpawnerConfigName.normalize(name));
+    }
+
+    public MobDefinition getDefaultDefinition(EntityType type) {
+        return defaultDefinitionsByEntity.get(type);
+    }
+
+    public Set<String> getDefinitionNames() {
+        return Collections.unmodifiableSet(definitionsByName.keySet());
+    }
+
+    public record MobDefinition(String name, EntityType entityType, EntityLootConfig lootConfig) {}
 
     /**
      * Reload the configuration

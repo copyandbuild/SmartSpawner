@@ -28,8 +28,9 @@ const enManualSidebar = [
     text: 'Configuration',
     items: [
       { text: 'Main Config', link: '/docs/configuration' },
-      { text: 'Spawner Settings', link: '/docs/spawners-settings' },
-      { text: 'Item Spawner Settings', link: '/docs/item-spawners-settings' },
+      { text: 'Sell Integration', link: '/docs/sell-integration' },
+      { text: 'Mob Spawners', link: '/docs/spawner-mobs' },
+      { text: 'Item Spawners', link: '/docs/spawner-items' },
       { text: 'GUI Layout', link: '/docs/gui-layout' }
     ]
   },
@@ -77,7 +78,6 @@ const enManualSidebar = [
           { text: 'IridiumSkyblock', link: '/docs/integrations/islands/iridiumskyblock' }
         ]
       },
-      { text: 'Bedrock Support', link: '/docs/integrations/bedrock-support' },
       { text: 'AuraSkills', link: '/docs/integrations/auraskills' },
       { text: 'MythicMobs', link: '/docs/integrations/mythicmobs' },
       { text: 'Troubleshooting', link: '/docs/integrations/troubleshooting' }
@@ -109,8 +109,9 @@ const viManualSidebar = [
     text: 'Cấu hình',
     items: [
       { text: 'Cấu hình chính', link: '/vi/docs/configuration' },
-      { text: 'Thiết lập Spawner', link: '/vi/docs/spawners-settings' },
-      { text: 'Thiết lập Item Spawner', link: '/vi/docs/item-spawners-settings' },
+      { text: 'Tích hợp bán', link: '/vi/docs/sell-integration' },
+      { text: 'Spawner Mob', link: '/vi/docs/spawner-mobs' },
+      { text: 'Item Spawner', link: '/vi/docs/spawner-items' },
       { text: 'Bố cục GUI', link: '/vi/docs/gui-layout' }
     ]
   },
@@ -158,7 +159,6 @@ const viManualSidebar = [
           { text: 'IridiumSkyblock', link: '/vi/docs/integrations/islands/iridiumskyblock' }
         ]
       },
-      { text: 'Hỗ trợ Bedrock', link: '/vi/docs/integrations/bedrock-support' },
       { text: 'AuraSkills', link: '/vi/docs/integrations/auraskills' },
       { text: 'MythicMobs', link: '/vi/docs/integrations/mythicmobs' },
       { text: 'Khắc phục sự cố', link: '/vi/docs/integrations/troubleshooting' }

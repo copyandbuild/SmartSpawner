@@ -118,10 +118,11 @@ public class SpawnerMenuUI {
         GuiLayout layout = plugin.getGuiLayoutConfig().getMainLayout(spawner, player);
         Inventory menu = createMenu(spawner, layout);
 
-        // OPTIMIZATION: Populate menu items based on layout configuration
-        // Iterate through ALL buttons in layout and create items based on their actions
+        // Populate menu items from the layout. A button's item is chosen by its identity
+        // (the info_button flag, or a recognized action), not by requiring an action: an
+        // enabled button with a valid key always appears, even with no action at all.
         ItemStack[] items = new ItemStack[INVENTORY_SIZE];
-        
+
         for (GuiButton button : layout.getAllButtons().values()) {
             if (!button.isEnabled()) {
                 continue;
@@ -132,30 +133,35 @@ public class SpawnerMenuUI {
                 continue;
             }
 
-            // OPTIMIZATION: Get action - check all action types not just default
-            // A button might have left_click/right_click but no click
-            String action = getAnyActionFromButton(button);
-            if (action == null || action.isEmpty()) {
-                continue;
-            }
-
-            ItemStack item = null;
-            switch (action) {
-                case "open_storage":
-                    item = createLootStorageItem(spawner, button);
-                    break;
-                case "open_stacker":
-                case "sell_and_exp":
-                case "none":
-                    // Spawner info button or custom action
-                    item = createSpawnerInfoItem(player, spawner, button);
-                    break;
-                case "collect_exp":
-                    item = createExpItem(spawner, button);
-                    break;
-                default:
-                    plugin.getLogger().warning("Unknown action in main GUI: " + action);
-                    continue;
+            ItemStack item;
+            if (button.isInfoButton()) {
+                // The spawner info button is display-oriented; it does not need an action to show.
+                item = createSpawnerInfoItem(player, spawner, button);
+            } else {
+                // Check all click types, not just the default one.
+                String action = getAnyActionFromButton(button);
+                if (action == null || action.isEmpty()) {
+                    action = "none";
+                }
+                switch (action) {
+                    case "open_storage":
+                        item = createLootStorageItem(spawner, button);
+                        break;
+                    case "collect_exp":
+                        item = createExpItem(spawner, button);
+                        break;
+                    case "sell_and_exp":
+                        item = createSpawnerInfoItem(player, spawner, button);
+                        break;
+                    case "none":
+                        // Display-only button: show it as configured with no behavior.
+                        item = createStaticItem(button);
+                        break;
+                    default:
+                        // Unknown action: keep the button visible rather than hiding it.
+                        item = createStaticItem(button);
+                        break;
+                }
             }
 
             if (item != null) {
@@ -229,17 +235,17 @@ public class SpawnerMenuUI {
         
         // Define all available placeholders
         Set<String> availablePlaceholders = Set.of(
-            "max_slots", "current_items", "percent_storage_rounded", "loot_items"
+            "max_slots", "current_items", "percent_storage_rounded", "total_sell_price", "loot_items"
         );
-        
+
         // Detect which placeholders are actually used
         Set<String> usedPlaceholders = new HashSet<>();
         usedPlaceholders.addAll(detectUsedPlaceholders(nameTemplate, availablePlaceholders));
         usedPlaceholders.addAll(detectUsedPlaceholders(loreTemplate, availablePlaceholders));
-        
+
         // Build only the placeholders that are actually used
         Map<String, String> placeholders = new HashMap<>();
-        
+
         if (usedPlaceholders.contains("max_slots")) {
             placeholders.put("max_slots", languageManager.formatNumber(maxSlots));
         }
@@ -250,8 +256,14 @@ public class SpawnerMenuUI {
             int percentStorage = calculatePercentage(currentItems, maxSlots);
             placeholders.put("percent_storage_rounded", String.valueOf(percentStorage));
         }
+        if (usedPlaceholders.contains("total_sell_price")) {
+            if (spawner.isSellValueDirty()) {
+                spawner.recalculateSellValue();
+            }
+            placeholders.put("total_sell_price", languageManager.formatNumber(spawner.getAccumulatedSellValue()));
+        }
         final List<Component> finalLootComponents = usedPlaceholders.contains("loot_items") 
-                ? buildLootItemComponents(spawner.getEntityType(), virtualInventory.getConsolidatedItems()) 
+                ? buildLootItemComponents(spawner, virtualInventory.getConsolidatedItems())
                 : Collections.emptyList();
 
         Consumer<ItemMeta> metaModifier = meta -> {
@@ -375,10 +387,13 @@ public class SpawnerMenuUI {
         String buttonConfig = (button != null) ? (button.getMaterial().name() + "_" + button.getCustomTexture()) : "default";
         String cacheKey = spawner.getSpawnerId() + "|info|" + currentItems + "|" + maxSlots + "|" + currentExp + "|" + maxExp + "|" + hasShopPermission + "|" + buttonConfig;
 
-        // Check cache first
+        // Check cache first. The cached item keeps the {time} placeholder unresolved (the
+        // countdown is never baked in), so resolve it against the live timer on every return.
         ItemStack cachedItem = itemCache.get(cacheKey);
         if (cachedItem != null && !isCacheEntryExpired(cacheKey)) {
-            return cachedItem.clone();
+            ItemStack result = cachedItem.clone();
+            applyTimerPlaceholder(result, spawner, player);
+            return result;
         }
 
         // Smart placeholder detection: First, get the raw name and lore templates
@@ -493,11 +508,10 @@ public class SpawnerMenuUI {
             placeholders.put("total_sell_price", languageManager.formatNumber(totalSellPrice));
         }
 
-        // Calculate and add timer value
-        if (usedPlaceholders.contains("time")) {
-            String timerValue = plugin.getSpawnerGuiViewManager().calculateTimerDisplay(spawner, player);
-            placeholders.put("time", timerValue);
-        }
+        // NOTE: {time} is deliberately left unresolved here so it is not baked into the cached
+        // item. The live countdown is a per-tick value; baking it would freeze a stale time in the
+        // cache (and pollute the placeholder cache). It is resolved via applyTimerPlaceholder() on
+        // every return instead, so the item always shows the current countdown.
 
         // Prepare the meta modifier consumer
         Consumer<ItemMeta> metaModifier = meta -> {
@@ -519,7 +533,7 @@ public class SpawnerMenuUI {
             // Use custom texture from GUI layout if provided
             spawnerItem = SpawnerMobHeadTexture.getCustomHeadFromTexture(button.getCustomTexture(), metaModifier);
         } else if (button != null && button.getMaterial() == Material.PLAYER_HEAD) {
-            // Fallback to entity-based custom head (from spawners_settings.yml)
+            // Fallback to entity-based custom head (from spawner_mobs.yml)
             spawnerItem = SpawnerMobHeadTexture.getCustomHead(entityType, player, metaModifier);
         } else if (button != null) {
             // Use the configured material
@@ -531,12 +545,61 @@ public class SpawnerMenuUI {
         }
 
         if (spawnerItem.getType() == Material.SPAWNER) ItemTooltipUtil.hideTooltip(spawnerItem);
-        
-        // Cache the result
+
+        // Cache the result while {time} is still an unresolved placeholder, then resolve it on the
+        // returned copy so the cache never holds a frozen countdown value.
         itemCache.put(cacheKey, spawnerItem.clone());
         cacheTimestamps.put(cacheKey, System.currentTimeMillis());
-        
+
+        applyTimerPlaceholder(spawnerItem, spawner, player);
+
         return spawnerItem;
+    }
+
+    /**
+     * Resolves the {time} placeholder in an already-built spawner info item against the current
+     * countdown. Does nothing (and never computes the timer) when the item uses no {time}
+     * placeholder, so layouts without a timer pay no cost. This is intentionally kept outside the
+     * item and placeholder caches, because the countdown changes every second.
+     */
+    private void applyTimerPlaceholder(ItemStack item, SpawnerData spawner, Player player) {
+        if (item == null) {
+            return;
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return;
+        }
+
+        boolean nameHasTimer = meta.hasDisplayName() && meta.getDisplayName().contains("{time}");
+        List<String> lore = meta.hasLore() ? meta.getLore() : null;
+        boolean loreHasTimer = false;
+        if (lore != null) {
+            for (String line : lore) {
+                if (line.contains("{time}")) {
+                    loreHasTimer = true;
+                    break;
+                }
+            }
+        }
+
+        if (!nameHasTimer && !loreHasTimer) {
+            return;
+        }
+
+        String timerValue = plugin.getSpawnerGuiViewManager().calculateTimerDisplay(spawner, player);
+
+        if (nameHasTimer) {
+            meta.setDisplayName(meta.getDisplayName().replace("{time}", timerValue));
+        }
+        if (loreHasTimer) {
+            List<String> updatedLore = new ArrayList<>(lore.size());
+            for (String line : lore) {
+                updatedLore.add(line.replace("{time}", timerValue));
+            }
+            meta.setLore(updatedLore);
+        }
+        item.setItemMeta(meta);
     }
 
     public ItemStack createExpItem(SpawnerData spawner, GuiButton button) {
@@ -594,18 +657,37 @@ public class SpawnerMenuUI {
         return expItem;
     }
 
+    /**
+     * Builds a display-only item for a button that has no behavior (no action, or an
+     * unrecognized one). It renders the configured material or custom head so the button
+     * stays visible in the menu based on its layout key alone.
+     */
+    private ItemStack createStaticItem(GuiButton button) {
+        ItemStack item;
+        if (button.getMaterial() == Material.PLAYER_HEAD
+                && button.getCustomTexture() != null && !button.getCustomTexture().trim().isEmpty()) {
+            item = SpawnerMobHeadTexture.getCustomHeadFromTexture(button.getCustomTexture(), null);
+        } else {
+            item = new ItemStack(button.getMaterial());
+        }
+        if (item.getType() == Material.SPAWNER) {
+            ItemTooltipUtil.hideTooltip(item);
+        }
+        return item;
+    }
+
     private int calculatePercentage(long current, long maximum) {
         return maximum > 0 ? (int) ((double) current / maximum * 100) : 0;
     }
 
-    private List<Component> buildLootItemComponents(EntityType entityType, Map<ItemSignature, Long> storedItems) {
+    private List<Component> buildLootItemComponents(SpawnerData spawner, Map<ItemSignature, Long> storedItems) {
         Map<Material, Long> materialAmountMap = new HashMap<>();
         for (Map.Entry<ItemSignature, Long> entry : storedItems.entrySet()) {
             Material material = entry.getKey().getMaterial();
             materialAmountMap.merge(material, entry.getValue(), Long::sum);
         }
 
-        EntityLootConfig lootConfig = plugin.getSpawnerSettingsConfig().getLootConfig(entityType);
+        EntityLootConfig lootConfig = spawner.getLootConfig();
         List<LootItem> possibleLootItems = lootConfig != null ? lootConfig.getAllItems() : Collections.emptyList();
 
         if (possibleLootItems.isEmpty() && storedItems.isEmpty()) {
@@ -621,18 +703,17 @@ public class SpawnerMenuUI {
                 String formattedAmount = languageManager.formatNumber(amount);
                 String chance = String.format("%.1f", lootItem.chance()) + "%";
                 components.add(languageManager.buildTranslatableGuiLootLine(
-                        LOOT_ITEM_FORMAT_KEY, material, formattedAmount, chance));
+                        LOOT_ITEM_FORMAT_KEY, lootItem.template(), formattedAmount, chance));
             }
         } else {
             List<Map.Entry<ItemSignature, Long>> sortedItems =
                     new ArrayList<>(storedItems.entrySet());
             sortedItems.sort(Comparator.comparing(e -> e.getKey().getMaterialName()));
             for (Map.Entry<ItemSignature, Long> entry : sortedItems) {
-                Material material = entry.getKey().getMaterial();
                 long amount = entry.getValue();
                 String formattedAmount = languageManager.formatNumber(amount);
                 components.add(languageManager.buildTranslatableGuiLootLine(
-                        LOOT_ITEM_FORMAT_KEY, material, formattedAmount, ""));
+                        LOOT_ITEM_FORMAT_KEY, entry.getKey().getTemplate(), formattedAmount, ""));
             }
         }
         return components;

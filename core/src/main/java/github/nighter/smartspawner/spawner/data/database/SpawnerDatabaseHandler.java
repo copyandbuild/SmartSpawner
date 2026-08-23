@@ -3,18 +3,19 @@ package github.nighter.smartspawner.spawner.data.database;
 import github.nighter.smartspawner.SmartSpawner;
 import github.nighter.smartspawner.Scheduler;
 import github.nighter.smartspawner.commands.list.gui.CrossServerSpawnerData;
+import github.nighter.smartspawner.spawner.data.storage.SpawnerInventoryCodec;
 import github.nighter.smartspawner.spawner.data.storage.SpawnerStorage;
 import github.nighter.smartspawner.spawner.data.storage.StorageMode;
 import github.nighter.smartspawner.spawner.properties.ItemSignature;
 import github.nighter.smartspawner.spawner.properties.SpawnerData;
 import github.nighter.smartspawner.spawner.properties.VirtualInventory;
-import github.nighter.smartspawner.spawner.utils.ItemStackSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
 
+import java.io.IOException;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +29,13 @@ import java.util.stream.Collectors;
  * Implements SpawnerStorage interface with MariaDB operations.
  */
 public class SpawnerDatabaseHandler implements SpawnerStorage {
+    /** Used when {@code database.autosave-interval} is absent or unparseable. */
+    private static final String DEFAULT_AUTOSAVE_INTERVAL = "3m";
+    private static final long DEFAULT_AUTOSAVE_TICKS = 3L * 60L * 20L;
+
+    /** Floor on the configured interval. Flushing more often than this buys nothing and costs I/O. */
+    private static final long MIN_AUTOSAVE_TICKS = 30L * 20L;
+
     private final SmartSpawner plugin;
     private final Logger logger;
     private final DatabaseManager databaseManager;
@@ -44,110 +52,119 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     private final Map<String, String> locationCache = new ConcurrentHashMap<>();
 
     // SQL Statements
-    private static final String SELECT_ALL_SQL = """
-            SELECT spawner_id, world_name, loc_x, loc_y, loc_z, entity_type, item_spawner_material,
-                   spawner_exp, spawner_active, spawner_range, spawner_stop, spawn_delay,
-                   max_spawner_loot_slots, max_stored_exp, min_mobs, max_mobs, stack_size,
-                   max_stack_size, last_spawn_time, is_at_capacity, last_interacted_player,
-                   preferred_sort_item, filtered_items, inventory_data
-            FROM smart_spawners WHERE server_name = ?
-            """;
-
-    private static final String SELECT_ONE_SQL = """
-            SELECT spawner_id, world_name, loc_x, loc_y, loc_z, entity_type, item_spawner_material,
-                   spawner_exp, spawner_active, spawner_range, spawner_stop, spawn_delay,
-                   max_spawner_loot_slots, max_stored_exp, min_mobs, max_mobs, stack_size,
-                   max_stack_size, last_spawn_time, is_at_capacity, last_interacted_player,
-                   preferred_sort_item, filtered_items, inventory_data
-            FROM smart_spawners WHERE server_name = ? AND spawner_id = ?
-            """;
-
-    private static final String SELECT_LOCATION_SQL = """
-            SELECT world_name, loc_x, loc_y, loc_z FROM smart_spawners
-            WHERE server_name = ? AND spawner_id = ?
+    private static final String SELECT_COLUMNS = """
+            spawner_id, world, loc_x, loc_y, loc_z,
+            entity_type, itemspawner_type, config_name, stack_size, max_stack_size,
+            active, stop, activation_range, delay, last_spawn_time, min_mobs, max_mobs,
+            max_loot_slots, is_at_capacity, exp, max_stored_exp,
+            last_interacted_player, preferred_sort_item, filtered_items, storage_items
             """;
 
     // MySQL/MariaDB upsert syntax
     private static final String UPSERT_SQL_MYSQL = """
-            INSERT INTO smart_spawners (
-                spawner_id, server_name, world_name, loc_x, loc_y, loc_z,
-                entity_type, item_spawner_material, spawner_exp, spawner_active,
-                spawner_range, spawner_stop, spawn_delay, max_spawner_loot_slots,
-                max_stored_exp, min_mobs, max_mobs, stack_size, max_stack_size,
-                last_spawn_time, is_at_capacity, last_interacted_player,
-                preferred_sort_item, filtered_items, inventory_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO %s (
+                spawner_id, world, loc_x, loc_y, loc_z, chunk_x, chunk_z,
+                entity_type, itemspawner_type, stack_size, max_stack_size,
+                active, stop, activation_range, delay, last_spawn_time, min_mobs, max_mobs,
+                max_loot_slots, is_at_capacity, total_items, exp, max_stored_exp,
+                last_interacted_player, preferred_sort_item, filtered_items, storage_items, config_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
-                world_name = VALUES(world_name),
+                world = VALUES(world),
                 loc_x = VALUES(loc_x),
                 loc_y = VALUES(loc_y),
                 loc_z = VALUES(loc_z),
+                chunk_x = VALUES(chunk_x),
+                chunk_z = VALUES(chunk_z),
                 entity_type = VALUES(entity_type),
-                item_spawner_material = VALUES(item_spawner_material),
-                spawner_exp = VALUES(spawner_exp),
-                spawner_active = VALUES(spawner_active),
-                spawner_range = VALUES(spawner_range),
-                spawner_stop = VALUES(spawner_stop),
-                spawn_delay = VALUES(spawn_delay),
-                max_spawner_loot_slots = VALUES(max_spawner_loot_slots),
-                max_stored_exp = VALUES(max_stored_exp),
-                min_mobs = VALUES(min_mobs),
-                max_mobs = VALUES(max_mobs),
+                itemspawner_type = VALUES(itemspawner_type),
                 stack_size = VALUES(stack_size),
                 max_stack_size = VALUES(max_stack_size),
+                active = VALUES(active),
+                stop = VALUES(stop),
+                activation_range = VALUES(activation_range),
+                delay = VALUES(delay),
                 last_spawn_time = VALUES(last_spawn_time),
+                min_mobs = VALUES(min_mobs),
+                max_mobs = VALUES(max_mobs),
+                max_loot_slots = VALUES(max_loot_slots),
                 is_at_capacity = VALUES(is_at_capacity),
+                total_items = VALUES(total_items),
+                exp = VALUES(exp),
+                max_stored_exp = VALUES(max_stored_exp),
                 last_interacted_player = VALUES(last_interacted_player),
                 preferred_sort_item = VALUES(preferred_sort_item),
                 filtered_items = VALUES(filtered_items),
-                inventory_data = VALUES(inventory_data)
+                storage_items = VALUES(storage_items),
+                config_name = VALUES(config_name)
             """;
 
     // SQLite upsert syntax (ON CONFLICT)
     private static final String UPSERT_SQL_SQLITE = """
-            INSERT INTO smart_spawners (
-                spawner_id, server_name, world_name, loc_x, loc_y, loc_z,
-                entity_type, item_spawner_material, spawner_exp, spawner_active,
-                spawner_range, spawner_stop, spawn_delay, max_spawner_loot_slots,
-                max_stored_exp, min_mobs, max_mobs, stack_size, max_stack_size,
-                last_spawn_time, is_at_capacity, last_interacted_player,
-                preferred_sort_item, filtered_items, inventory_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(server_name, spawner_id) DO UPDATE SET
-                world_name = excluded.world_name,
+            INSERT INTO %s (
+                spawner_id, world, loc_x, loc_y, loc_z, chunk_x, chunk_z,
+                entity_type, itemspawner_type, stack_size, max_stack_size,
+                active, stop, activation_range, delay, last_spawn_time, min_mobs, max_mobs,
+                max_loot_slots, is_at_capacity, total_items, exp, max_stored_exp,
+                last_interacted_player, preferred_sort_item, filtered_items, storage_items, config_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(spawner_id) DO UPDATE SET
+                world = excluded.world,
                 loc_x = excluded.loc_x,
                 loc_y = excluded.loc_y,
                 loc_z = excluded.loc_z,
+                chunk_x = excluded.chunk_x,
+                chunk_z = excluded.chunk_z,
                 entity_type = excluded.entity_type,
-                item_spawner_material = excluded.item_spawner_material,
-                spawner_exp = excluded.spawner_exp,
-                spawner_active = excluded.spawner_active,
-                spawner_range = excluded.spawner_range,
-                spawner_stop = excluded.spawner_stop,
-                spawn_delay = excluded.spawn_delay,
-                max_spawner_loot_slots = excluded.max_spawner_loot_slots,
-                max_stored_exp = excluded.max_stored_exp,
-                min_mobs = excluded.min_mobs,
-                max_mobs = excluded.max_mobs,
+                itemspawner_type = excluded.itemspawner_type,
                 stack_size = excluded.stack_size,
                 max_stack_size = excluded.max_stack_size,
+                active = excluded.active,
+                stop = excluded.stop,
+                activation_range = excluded.activation_range,
+                delay = excluded.delay,
                 last_spawn_time = excluded.last_spawn_time,
+                min_mobs = excluded.min_mobs,
+                max_mobs = excluded.max_mobs,
+                max_loot_slots = excluded.max_loot_slots,
                 is_at_capacity = excluded.is_at_capacity,
+                total_items = excluded.total_items,
+                exp = excluded.exp,
+                max_stored_exp = excluded.max_stored_exp,
                 last_interacted_player = excluded.last_interacted_player,
                 preferred_sort_item = excluded.preferred_sort_item,
                 filtered_items = excluded.filtered_items,
-                inventory_data = excluded.inventory_data
+                storage_items = excluded.storage_items,
+                config_name = excluded.config_name
             """;
 
-    private static final String DELETE_SQL = """
-            DELETE FROM smart_spawners WHERE server_name = ? AND spawner_id = ?
+    /** Columns the cross-server list GUI needs. Deliberately excludes the item blob. */
+    private static final String CROSS_SERVER_COLUMNS = """
+            spawner_id, world, loc_x, loc_y, loc_z,
+            entity_type, stack_size, stop, last_interacted_player,
+            exp, total_items
             """;
+
+    // Statements carrying the table name, which is only known once database.table_prefix is read
+    private final String tableSpawners;
+    private final String selectAllSql;
+    private final String selectOneSql;
+    private final String selectLocationSql;
+    private final String deleteSql;
 
     public SpawnerDatabaseHandler(SmartSpawner plugin, DatabaseManager databaseManager) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.databaseManager = databaseManager;
         this.serverName = databaseManager.getServerName();
+        this.tableSpawners = databaseManager.getTableSpawners();
+
+        this.selectAllSql = "SELECT " + SELECT_COLUMNS + " FROM " + tableSpawners + ";";
+        this.selectOneSql = "SELECT " + SELECT_COLUMNS + " FROM " + tableSpawners
+                + " WHERE spawner_id = ?";
+        this.selectLocationSql = "SELECT world, loc_x, loc_y, loc_z FROM " + tableSpawners
+                + " WHERE spawner_id = ?";
+        this.deleteSql = "DELETE FROM " + tableSpawners + " WHERE spawner_id = ?";
     }
 
     @Override
@@ -162,9 +179,14 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         return true;
     }
 
+    /**
+     * (Re)starts the batched save timer from {@code database.autosave-interval}.
+     *
+     * <p>Called again by {@link #reloadSettings()}, so a changed interval takes effect on
+     * {@code /ss reload} rather than needing a restart like the rest of the database section.</p>
+     */
     private void startSaveTask() {
-        // Hardcoded 5-minute interval (5 * 60 * 20 = 6000 ticks)
-        long intervalTicks = 6000L;
+        long intervalTicks = Math.max(MIN_AUTOSAVE_TICKS, configuredAutosaveTicks());
 
         if (saveTask != null) {
             saveTask.cancel();
@@ -172,9 +194,30 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         }
 
         saveTask = Scheduler.runTaskTimerAsync(() -> {
-            plugin.debug("Running scheduled database save task");
             flushChanges();
         }, intervalTicks, intervalTicks);
+    }
+
+    /**
+     * Parses {@code database.autosave-interval} directly rather than through
+     * {@code plugin.getTimeFromConfig}, whose fallback for an unreadable value is one hour. An hour
+     * of unsaved spawner data is the wrong answer to a typo; the shipped default is.
+     */
+    private long configuredAutosaveTicks() {
+        String configured = plugin.getConfig().getString("database.autosave-interval", DEFAULT_AUTOSAVE_INTERVAL);
+        long ticks = plugin.getTimeFormatter().parseTimeToTicks(configured, -1L);
+        if (ticks > 0) {
+            return ticks;
+        }
+
+        logger.warning("Could not read database.autosave-interval ('" + configured + "'), using "
+                + DEFAULT_AUTOSAVE_INTERVAL + " instead.");
+        return DEFAULT_AUTOSAVE_TICKS;
+    }
+
+    @Override
+    public void reloadSettings() {
+        startSaveTask();
     }
 
     @Override
@@ -202,17 +245,14 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     @Override
     public void flushChanges() {
         if (dirtySpawners.isEmpty() && deletedSpawners.isEmpty()) {
-            plugin.debug("No database changes to flush");
             return;
         }
 
         if (isSaving) {
-            plugin.debug("Database flush operation already in progress");
             return;
         }
 
         isSaving = true;
-        plugin.debug("Flushing " + dirtySpawners.size() + " modified and " + deletedSpawners.size() + " deleted spawners to database");
 
         Scheduler.runTaskAsync(() -> {
             try {
@@ -245,9 +285,9 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         if (spawnerIds.isEmpty()) return;
 
         // Select appropriate SQL based on storage mode
-        String upsertSql = databaseManager.getStorageMode() == StorageMode.SQLITE
+        String upsertSql = (databaseManager.getStorageMode() == StorageMode.SQLITE
                 ? UPSERT_SQL_SQLITE
-                : UPSERT_SQL_MYSQL;
+                : UPSERT_SQL_MYSQL).formatted(tableSpawners);
 
         try (Connection conn = databaseManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(upsertSql)) {
@@ -258,13 +298,13 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
                 SpawnerData spawner = plugin.getSpawnerManager().getSpawnerById(spawnerId);
                 if (spawner == null) continue;
 
-                setSpawnerParameters(stmt, spawner);
-                stmt.addBatch();
+                if (setSpawnerParameters(stmt, spawner)) {
+                    stmt.addBatch();
+                }
             }
 
             stmt.executeBatch();
             conn.commit();
-            plugin.debug("Saved " + spawnerIds.size() + " spawners to database");
 
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Error saving spawner batch to database", e);
@@ -277,19 +317,17 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         if (spawnerIds.isEmpty()) return;
 
         try (Connection conn = databaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(DELETE_SQL)) {
+             PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
 
             conn.setAutoCommit(false);
 
             for (String spawnerId : spawnerIds) {
-                stmt.setString(1, serverName);
-                stmt.setString(2, spawnerId);
+                stmt.setString(1, spawnerId);
                 stmt.addBatch();
             }
 
             stmt.executeBatch();
             conn.commit();
-            plugin.debug("Deleted " + spawnerIds.size() + " spawners from database");
 
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Error deleting spawner batch from database", e);
@@ -298,34 +336,63 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         }
     }
 
-    private void setSpawnerParameters(PreparedStatement stmt, SpawnerData spawner) throws SQLException {
+    /**
+     * Binds one spawner onto the upsert statement.
+     *
+     * @return false when the inventory could not be encoded, in which case the caller must skip the
+     *         row. Writing it anyway would replace the stored items with an empty blob.
+     */
+    private boolean setSpawnerParameters(PreparedStatement stmt, SpawnerData spawner) throws SQLException {
         Location loc = spawner.getSpawnerLocation();
 
+        byte[] items;
+        long totalItems;
+        VirtualInventory virtualInv = spawner.getVirtualInventory();
+        if (virtualInv == null) {
+            items = null;
+            totalItems = 0L;
+        } else {
+            Map<ItemSignature, Long> consolidated = virtualInv.getConsolidatedItems();
+            try {
+                items = SpawnerInventoryCodec.encode(consolidated);
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "Could not encode inventory for spawner " + spawner.getSpawnerId()
+                        + ", skipping this save so the stored items are not lost", e);
+                dirtySpawners.add(spawner.getSpawnerId());
+                return false;
+            }
+            totalItems = SpawnerInventoryCodec.totalItems(consolidated);
+        }
+
         stmt.setString(1, spawner.getSpawnerId());
-        stmt.setString(2, serverName);
-        stmt.setString(3, loc.getWorld().getName());
-        stmt.setInt(4, loc.getBlockX());
-        stmt.setInt(5, loc.getBlockY());
-        stmt.setInt(6, loc.getBlockZ());
-        stmt.setString(7, spawner.getEntityType().name());
-        stmt.setString(8, spawner.isItemSpawner() ? spawner.getSpawnedItemMaterial().name() : null);
-        stmt.setLong(9, Math.max(0L, spawner.getSpawnerExp()));
-        stmt.setBoolean(10, spawner.getSpawnerActive());
-        stmt.setInt(11, spawner.getSpawnerRange());
-        stmt.setBoolean(12, spawner.getSpawnerStop().get());
-        stmt.setLong(13, spawner.getSpawnDelay());
-        stmt.setInt(14, spawner.getMaxSpawnerLootSlots());
-        stmt.setLong(15, spawner.getMaxStoredExp());
-        stmt.setInt(16, spawner.getMinMobs());
-        stmt.setInt(17, spawner.getMaxMobs());
-        stmt.setInt(18, spawner.getStackSize());
-        stmt.setInt(19, spawner.getMaxStackSize());
-        stmt.setLong(20, spawner.getLastSpawnTime());
-        stmt.setBoolean(21, spawner.getIsAtCapacity());
-        stmt.setString(22, spawner.getLastInteractedPlayer());
-        stmt.setString(23, spawner.getPreferredSortItem() != null ? spawner.getPreferredSortItem().name() : null);
-        stmt.setString(24, serializeFilteredItems(spawner.getFilteredItems()));
-        stmt.setString(25, serializeInventory(spawner.getVirtualInventory()));
+        stmt.setString(2, loc.getWorld().getName());
+        stmt.setInt(3, loc.getBlockX());
+        stmt.setInt(4, loc.getBlockY());
+        stmt.setInt(5, loc.getBlockZ());
+        stmt.setInt(6, loc.getBlockX() >> 4);
+        stmt.setInt(7, loc.getBlockZ() >> 4);
+        stmt.setString(8, spawner.getEntityType().name());
+        stmt.setString(9, spawner.isItemSpawner() ? spawner.getSpawnedItemMaterial().name() : null);
+        stmt.setInt(10, spawner.getStackSize());
+        stmt.setInt(11, spawner.getMaxStackSize());
+        stmt.setBoolean(12, spawner.getSpawnerActive());
+        stmt.setBoolean(13, spawner.getSpawnerStop().get());
+        stmt.setInt(14, spawner.getSpawnerRange());
+        stmt.setLong(15, spawner.getSpawnDelay());
+        stmt.setLong(16, spawner.getLastSpawnTime());
+        stmt.setInt(17, spawner.getMinMobs());
+        stmt.setInt(18, spawner.getMaxMobs());
+        stmt.setInt(19, spawner.getMaxSpawnerLootSlots());
+        stmt.setBoolean(20, spawner.getIsAtCapacity());
+        stmt.setLong(21, totalItems);
+        stmt.setLong(22, Math.max(0L, spawner.getSpawnerExp()));
+        stmt.setLong(23, spawner.getMaxStoredExp());
+        stmt.setString(24, spawner.getLastInteractedPlayer());
+        stmt.setString(25, spawner.getPreferredSortItem() != null ? spawner.getPreferredSortItem().name() : null);
+        stmt.setString(26, serializeFilteredItems(spawner.getFilteredItems()));
+        stmt.setBytes(27, items);
+        stmt.setString(28, spawner.getConfigName());
+        return true;
     }
 
     @Override
@@ -333,9 +400,7 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         Map<String, SpawnerData> loadedSpawners = new HashMap<>();
 
         try (Connection conn = databaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(SELECT_ALL_SQL)) {
-
-            stmt.setString(1, serverName);
+             PreparedStatement stmt = conn.prepareStatement(selectAllSql)) {
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
@@ -346,14 +411,13 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
 
                         // Cache location for WorldEventHandler
                         if (spawner == null) {
-                            String worldName = rs.getString("world_name");
+                            String worldName = rs.getString("world");
                             int x = rs.getInt("loc_x");
                             int y = rs.getInt("loc_y");
                             int z = rs.getInt("loc_z");
                             locationCache.put(spawnerId, String.format("%s,%d,%d,%d", worldName, x, y, z));
                         }
                     } catch (Exception e) {
-                        plugin.debug("Error loading spawner " + spawnerId + ": " + e.getMessage());
                         loadedSpawners.put(spawnerId, null);
                     }
                 }
@@ -369,10 +433,9 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     @Override
     public SpawnerData loadSpecificSpawner(String spawnerId) {
         try (Connection conn = databaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(SELECT_ONE_SQL)) {
+             PreparedStatement stmt = conn.prepareStatement(selectOneSql)) {
 
-            stmt.setString(1, serverName);
-            stmt.setString(2, spawnerId);
+            stmt.setString(1, spawnerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -397,14 +460,13 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
 
         // Query database
         try (Connection conn = databaseManager.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(SELECT_LOCATION_SQL)) {
+             PreparedStatement stmt = conn.prepareStatement(selectLocationSql)) {
 
-            stmt.setString(1, serverName);
-            stmt.setString(2, spawnerId);
+            stmt.setString(1, spawnerId);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    String worldName = rs.getString("world_name");
+                    String worldName = rs.getString("world");
                     int x = rs.getInt("loc_x");
                     int y = rs.getInt("loc_y");
                     int z = rs.getInt("loc_z");
@@ -423,14 +485,13 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
 
     private SpawnerData loadSpawnerFromResultSet(ResultSet rs) throws SQLException {
         String spawnerId = rs.getString("spawner_id");
-        String worldName = rs.getString("world_name");
+        String worldName = rs.getString("world");
         int x = rs.getInt("loc_x");
         int y = rs.getInt("loc_y");
         int z = rs.getInt("loc_z");
 
         org.bukkit.World world = Bukkit.getWorld(worldName);
         if (world == null) {
-            plugin.debug("World not yet loaded for spawner " + spawnerId + ": " + worldName);
             return null;
         }
 
@@ -446,26 +507,27 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
 
         // Create spawner based on type
         SpawnerData spawner;
-        String itemMaterialStr = rs.getString("item_spawner_material");
+        String itemMaterialStr = rs.getString("itemspawner_type");
+        String configName = rs.getString("config_name");
         if (entityType == EntityType.ITEM && itemMaterialStr != null) {
             try {
                 Material itemMaterial = Material.valueOf(itemMaterialStr);
-                spawner = new SpawnerData(spawnerId, location, itemMaterial, plugin);
+                spawner = new SpawnerData(spawnerId, location, itemMaterial, configName, plugin);
             } catch (IllegalArgumentException e) {
                 logger.severe("Invalid item spawner material for spawner " + spawnerId + ": " + itemMaterialStr);
                 return null;
             }
         } else {
-            spawner = new SpawnerData(spawnerId, location, entityType, plugin);
+            spawner = new SpawnerData(spawnerId, location, entityType, configName, plugin);
         }
 
         // Load settings
-        spawner.setSpawnerExpData(rs.getLong("spawner_exp"));
-        spawner.setSpawnerActive(rs.getBoolean("spawner_active"));
-        spawner.setSpawnerRange(rs.getInt("spawner_range"));
-        spawner.getSpawnerStop().set(rs.getBoolean("spawner_stop"));
-        spawner.setSpawnDelay(Math.max(1L, rs.getLong("spawn_delay")));
-        spawner.setMaxSpawnerLootSlots(rs.getInt("max_spawner_loot_slots"));
+        spawner.setSpawnerExpData(rs.getLong("exp"));
+        spawner.setSpawnerActive(rs.getBoolean("active"));
+        spawner.setSpawnerRange(rs.getInt("activation_range"));
+        spawner.getSpawnerStop().set(rs.getBoolean("stop"));
+        spawner.setSpawnDelay(Math.max(1L, rs.getLong("delay")));
+        spawner.setMaxSpawnerLootSlots(rs.getInt("max_loot_slots"));
         spawner.setMaxStoredExp(rs.getLong("max_stored_exp"));
         spawner.setMinMobs(rs.getInt("min_mobs"));
         spawner.setMaxMobs(rs.getInt("max_mobs"));
@@ -495,11 +557,14 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         }
 
         // Load inventory
-        String inventoryData = rs.getString("inventory_data");
+        byte[] itemsBlob = rs.getBytes("storage_items");
         VirtualInventory virtualInv = new VirtualInventory(spawner.getMaxSpawnerLootSlots());
-        if (inventoryData != null && !inventoryData.isEmpty()) {
+        if (itemsBlob != null && itemsBlob.length > 0) {
             try {
-                loadInventoryFromJson(inventoryData, virtualInv);
+                Map<ItemStack, Long> items = SpawnerInventoryCodec.decode(itemsBlob);
+                for (Map.Entry<ItemStack, Long> entry : items.entrySet()) {
+                    virtualInv.addConsolidatedItem(entry.getKey(), entry.getValue());
+                }
             } catch (Exception e) {
                 logger.warning("Error loading inventory for spawner " + spawnerId + ": " + e.getMessage());
             }
@@ -512,21 +577,23 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
             virtualInv.sortItems(spawner.getPreferredSortItem());
         }
 
-        // Restore the physical spawner block state for item spawners
-        if (spawner.isItemSpawner()) {
-            Scheduler.runLocationTask(location, () -> {
-                org.bukkit.block.Block block = location.getBlock();
-                if (block.getType() == Material.SPAWNER) {
-                    org.bukkit.block.BlockState state = block.getState(false);
-                    if (state instanceof org.bukkit.block.CreatureSpawner cs) {
-                        cs.setSpawnedType(EntityType.ITEM);
-                        ItemStack spawnedItem = new ItemStack(spawner.getSpawnedItemMaterial(), 1);
-                        cs.setSpawnedItem(spawnedItem);
-                        cs.update(true, false);
+        // Restore the complete in-cage model from config when the physical block is loaded.
+        Scheduler.runLocationTask(location, () -> {
+            org.bukkit.block.Block block = location.getBlock();
+            if (block.getType() == Material.SPAWNER) {
+                org.bukkit.block.BlockState state = block.getState(false);
+                if (state instanceof org.bukkit.block.CreatureSpawner cs) {
+                    if (spawner.isItemSpawner()) {
+                        github.nighter.smartspawner.spawner.config.SpawnerDisplayConfigurator.applyItem(
+                                plugin, cs, spawner.getConfigName(), spawner.getSpawnedItemMaterial());
+                    } else {
+                        github.nighter.smartspawner.spawner.config.SpawnerDisplayConfigurator.applyMob(
+                                plugin, cs, spawner.getConfigName(), spawner.getEntityType());
                     }
+                    cs.update(true, false);
                 }
-            });
-        }
+            }
+        });
 
         return spawner;
     }
@@ -591,103 +658,6 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         }
     }
 
-    private String serializeInventory(VirtualInventory virtualInv) {
-        if (virtualInv == null) {
-            return null;
-        }
-
-        Map<ItemSignature, Long> items = virtualInv.getConsolidatedItems();
-        if (items.isEmpty()) {
-            return null;
-        }
-
-        // Use existing ItemStackSerializer format, then join with a delimiter
-        List<String> serializedItems = ItemStackSerializer.serializeInventory(items);
-        if (serializedItems.isEmpty()) {
-            return null;
-        }
-
-        // Use a JSON-like array format that's easy to parse
-        // Format: ["item1:count","item2;damage:count:count",...]
-        StringBuilder sb = new StringBuilder();
-        sb.append("[");
-        for (int i = 0; i < serializedItems.size(); i++) {
-            if (i > 0) sb.append(",");
-            // Escape any quotes in the string and wrap in quotes
-            sb.append("\"").append(serializedItems.get(i).replace("\"", "\\\"")).append("\"");
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    private void loadInventoryFromJson(String jsonData, VirtualInventory virtualInv) {
-        if (jsonData == null || jsonData.isEmpty()) return;
-
-        // Parse our simple JSON array format
-        // Format: ["item1:count","item2;damage:count:count",...]
-        if (!jsonData.startsWith("[") || !jsonData.endsWith("]")) {
-            logger.warning("Invalid inventory JSON format: " + jsonData);
-            return;
-        }
-
-        String content = jsonData.substring(1, jsonData.length() - 1);
-        if (content.isEmpty()) return;
-
-        List<String> items = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-        boolean escaped = false;
-
-        for (char c : content.toCharArray()) {
-            if (escaped) {
-                current.append(c);
-                escaped = false;
-                continue;
-            }
-
-            if (c == '\\') {
-                escaped = true;
-                continue;
-            }
-
-            if (c == '"') {
-                inQuotes = !inQuotes;
-                continue;
-            }
-
-            if (c == ',' && !inQuotes) {
-                if (current.length() > 0) {
-                    items.add(current.toString());
-                    current = new StringBuilder();
-                }
-                continue;
-            }
-
-            current.append(c);
-        }
-
-        if (current.length() > 0) {
-            items.add(current.toString());
-        }
-
-        if (items.isEmpty()) return;
-
-        // Use existing ItemStackSerializer to deserialize
-        try {
-            Map<ItemStack, Integer> deserializedItems = ItemStackSerializer.deserializeInventory(items);
-            for (Map.Entry<ItemStack, Integer> entry : deserializedItems.entrySet()) {
-                ItemStack item = entry.getKey();
-                int amount = entry.getValue();
-
-                if (item != null && amount > 0) {
-                    virtualInv.addItem(item, amount);
-                }
-            }
-        } catch (Exception e) {
-            logger.warning("Error deserializing inventory data: " + e.getMessage());
-        }
-    }
-
     // ============== Cross-Server Query Methods ==============
 
     /**
@@ -699,24 +669,33 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     }
 
     /**
+     * The table holding {@code targetServer}'s spawners.
+     *
+     * <p>Since 1.8.0 a table belongs to exactly one server and says so in its name, so picking a
+     * server means picking a table rather than filtering rows. An unknown server falls back to this
+     * server's own table, which is what the single-server case always resolves to anyway.</p>
+     */
+    private String tableFor(String targetServer) {
+        try {
+            return databaseManager.listServerTables().getOrDefault(targetServer, tableSpawners);
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Could not list the spawner tables, using this server's", e);
+            return tableSpawners;
+        }
+    }
+
+    /**
      * Asynchronously get all distinct server names from the database.
      * @param callback Consumer to receive the list of server names on the main thread
      */
     public void getDistinctServerNamesAsync(Consumer<List<String>> callback) {
         Scheduler.runTaskAsync(() -> {
             List<String> servers = new ArrayList<>();
-            String sql = "SELECT DISTINCT server_name FROM smart_spawners ORDER BY server_name";
-
-            try (Connection conn = databaseManager.getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(sql);
-                 ResultSet rs = stmt.executeQuery()) {
-
-                while (rs.next()) {
-                    servers.add(rs.getString("server_name"));
-                }
-
+            try {
+                servers.addAll(databaseManager.listServerTables().keySet());
+                Collections.sort(servers);
             } catch (SQLException e) {
-                logger.log(Level.SEVERE, "Error fetching server names from database", e);
+                logger.log(Level.SEVERE, "Error listing the spawner tables in the database", e);
             }
 
             // Return to main thread
@@ -732,18 +711,17 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     public void getWorldsForServerAsync(String targetServer, Consumer<Map<String, WorldSpawnerStats>> callback) {
         Scheduler.runTaskAsync(() -> {
             Map<String, WorldSpawnerStats> worlds = new LinkedHashMap<>();
-            String sql = "SELECT world_name, COUNT(*) AS total, COALESCE(SUM(stack_size), 0) AS total_stacked " +
-                    "FROM smart_spawners WHERE server_name = ? GROUP BY world_name ORDER BY world_name";
+            String table = tableFor(targetServer);
+            String sql = "SELECT world, COUNT(*) AS total, COALESCE(SUM(stack_size), 0) AS total_stacked " +
+                    "FROM " + table + " GROUP BY world ORDER BY world";
 
             try (Connection conn = databaseManager.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-                stmt.setString(1, targetServer);
-
                 try (ResultSet rs = stmt.executeQuery()) {
                     while (rs.next()) {
                         worlds.put(
-                                rs.getString("world_name"),
+                                rs.getString("world"),
                                 new WorldSpawnerStats(rs.getInt("total"), rs.getInt("total_stacked"))
                         );
                     }
@@ -768,13 +746,12 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     public void getTotalStacksForWorldAsync(String targetServer, String worldName, Consumer<Integer> callback) {
         Scheduler.runTaskAsync(() -> {
             int total = 0;
-            String sql = "SELECT SUM(stack_size) as total FROM smart_spawners WHERE server_name = ? AND world_name = ?";
+            String sql = "SELECT SUM(stack_size) as total FROM " + tableFor(targetServer) + " WHERE world = ?";
 
             try (Connection conn = databaseManager.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-                stmt.setString(1, targetServer);
-                stmt.setString(2, worldName);
+                stmt.setString(1, worldName);
 
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
@@ -801,26 +778,21 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     public void getCrossServerSpawnersAsync(String targetServer, String worldName, Consumer<List<CrossServerSpawnerData>> callback) {
         Scheduler.runTaskAsync(() -> {
             List<CrossServerSpawnerData> spawners = new ArrayList<>();
-            String sql = """
-                SELECT spawner_id, server_name, world_name, loc_x, loc_y, loc_z,
-                       entity_type, stack_size, spawner_stop, last_interacted_player,
-                       spawner_exp, inventory_data
-                FROM smart_spawners
-                WHERE server_name = ? AND world_name = ?
-                ORDER BY stack_size DESC
-                """;
+            String sql = "SELECT " + CROSS_SERVER_COLUMNS
+                    + " FROM " + tableFor(targetServer)
+                    + " WHERE world = ?"
+                    + " ORDER BY stack_size DESC";
 
             try (Connection conn = databaseManager.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-                stmt.setString(1, targetServer);
-                stmt.setString(2, worldName);
+                stmt.setString(1, worldName);
 
                 try (ResultSet rs = stmt.executeQuery()) {
                     while (rs.next()) {
                         String spawnerId = rs.getString("spawner_id");
-                        String server = rs.getString("server_name");
-                        String world = rs.getString("world_name");
+                        String server = targetServer;
+                        String world = rs.getString("world");
                         int x = rs.getInt("loc_x");
                         int y = rs.getInt("loc_y");
                         int z = rs.getInt("loc_z");
@@ -833,12 +805,11 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
                         }
 
                         int stackSize = rs.getInt("stack_size");
-                        boolean active = !rs.getBoolean("spawner_stop");
+                        boolean active = !rs.getBoolean("stop");
                         String lastPlayer = rs.getString("last_interacted_player");
-                        long storedExp = rs.getLong("spawner_exp");
+                        long storedExp = rs.getLong("exp");
 
-                        // Estimate total items from inventory data
-                        long totalItems = estimateItemCount(rs.getString("inventory_data"));
+                        long totalItems = rs.getLong("total_items");
 
                         spawners.add(new CrossServerSpawnerData(
                                 spawnerId, server, world, x, y, z,
@@ -864,12 +835,10 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
     public void getSpawnerCountForServerAsync(String targetServer, Consumer<Integer> callback) {
         Scheduler.runTaskAsync(() -> {
             int count = 0;
-            String sql = "SELECT COUNT(*) as count FROM smart_spawners WHERE server_name = ?";
+            String sql = "SELECT COUNT(*) as count FROM " + tableFor(targetServer);
 
             try (Connection conn = databaseManager.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-                stmt.setString(1, targetServer);
 
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
@@ -901,19 +870,15 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
             List<CrossServerSpawnerData> spawners = new ArrayList<>();
 
             // Build dynamic SQL based on filter and sort
-            StringBuilder sql = new StringBuilder("""
-                SELECT spawner_id, server_name, world_name, loc_x, loc_y, loc_z,
-                       entity_type, stack_size, spawner_stop, last_interacted_player,
-                       spawner_exp, inventory_data
-                FROM smart_spawners
-                WHERE server_name = ? AND world_name = ?
-                """);
+            StringBuilder sql = new StringBuilder("SELECT " + CROSS_SERVER_COLUMNS
+                    + " FROM " + tableFor(targetServer)
+                    + " WHERE world = ?");
 
             // Add filter condition
             if ("ACTIVE".equalsIgnoreCase(filter)) {
-                sql.append(" AND spawner_stop = FALSE");
+                sql.append(" AND stop = FALSE");
             } else if ("INACTIVE".equalsIgnoreCase(filter)) {
-                sql.append(" AND spawner_stop = TRUE");
+                sql.append(" AND stop = TRUE");
             }
 
             // Add sort order
@@ -928,14 +893,13 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
             try (Connection conn = databaseManager.getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
 
-                stmt.setString(1, targetServer);
-                stmt.setString(2, worldName);
+                stmt.setString(1, worldName);
 
                 try (ResultSet rs = stmt.executeQuery()) {
                     while (rs.next()) {
                         String spawnerId = rs.getString("spawner_id");
-                        String server = rs.getString("server_name");
-                        String world = rs.getString("world_name");
+                        String server = targetServer;
+                        String world = rs.getString("world");
                         int x = rs.getInt("loc_x");
                         int y = rs.getInt("loc_y");
                         int z = rs.getInt("loc_z");
@@ -948,10 +912,10 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
                         }
 
                         int stackSize = rs.getInt("stack_size");
-                        boolean active = !rs.getBoolean("spawner_stop");
+                        boolean active = !rs.getBoolean("stop");
                         String lastPlayer = rs.getString("last_interacted_player");
-                        long storedExp = rs.getLong("spawner_exp");
-                        long totalItems = estimateItemCount(rs.getString("inventory_data"));
+                        long storedExp = rs.getLong("exp");
+                        long totalItems = rs.getLong("total_items");
 
                         spawners.add(new CrossServerSpawnerData(
                                 spawnerId, server, world, x, y, z,
@@ -969,28 +933,4 @@ public class SpawnerDatabaseHandler implements SpawnerStorage {
         });
     }
 
-    /**
-     * Estimate total item count from inventory JSON data.
-     */
-    private long estimateItemCount(String inventoryData) {
-        if (inventoryData == null || inventoryData.isEmpty()) {
-            return 0;
-        }
-
-        long total = 0;
-        // Simple regex to find numbers after colons (item counts)
-        // Format: ["ITEM:count","ITEM:count",...]
-        try {
-            String[] parts = inventoryData.split(":");
-            for (int i = 1; i < parts.length; i++) {
-                String numPart = parts[i].replaceAll("[^0-9]", " ").trim().split(" ")[0];
-                if (!numPart.isEmpty()) {
-                    total += Long.parseLong(numPart);
-                }
-            }
-        } catch (Exception e) {
-            // Ignore parsing errors
-        }
-        return total;
-    }
 }

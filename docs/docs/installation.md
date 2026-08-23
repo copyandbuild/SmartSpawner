@@ -6,7 +6,7 @@ Before installing SmartSpawner, make sure your server meets these requirements:
 
 | Requirement | Specification |
 |-------------|---------------|
-| **Minecraft Version** | 1.21.5+ |
+| **Minecraft Version** | 1.21.6+ |
 | **Server Software** | [Paper](https://papermc.io/downloads/paper), [Folia](https://papermc.io/downloads/folia), [Purpur](https://purpurmc.org/) or compatible forks |
 | **Java Version** | Java 25+ |
 
@@ -54,11 +54,12 @@ The plugin automatically creates its configuration files in `plugins/SmartSpawne
 
 | File | Description |
 |------|-------------|
-| `config.yml` | Main configuration: spawner behavior, economy, visuals |
-| `spawners_settings.yml` | Drop tables and XP values for each mob type |
-| `item_spawners_settings.yml` | Drop tables for item spawners |
-| `item_prices.yml` | Custom sell prices for items |
-| `spawners_data.yml` | Persistent spawner data (YAML mode) |
+| `config.yml` | Main configuration: spawner behavior, visuals, database |
+| `spawner_mobs.yml` | Drop tables and XP values for each mob type |
+| `spawner_items.yml` | Drop tables for item spawners |
+| `sell_integration.yml` | Economy, shop integration and custom sell prices |
+| `activity_log.yml` | Action logging to file and Discord |
+| `spawners.db` | Persistent spawner data (SQLite mode) |
 | `language/` | Language folder with translatable message files |
 | `gui_layouts/` | GUI layout folder |
 | `auraskills.yml` | AuraSkills integration settings (if AuraSkills is installed) |

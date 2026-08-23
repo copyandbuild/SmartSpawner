@@ -2,6 +2,7 @@ package github.nighter.smartspawner.spawner.interactions.place;
 
 import github.nighter.smartspawner.SmartSpawner;
 import github.nighter.smartspawner.api.events.SpawnerPlaceEvent;
+import github.nighter.smartspawner.api.events.SpawnerStackEvent;
 import github.nighter.smartspawner.config.Config;
 import github.nighter.smartspawner.extras.HopperService;
 import github.nighter.smartspawner.hooks.protections.CheckStackBlock;
@@ -10,6 +11,7 @@ import github.nighter.smartspawner.spawner.properties.SpawnerData;
 import github.nighter.smartspawner.spawner.data.SpawnerManager;
 import github.nighter.smartspawner.Scheduler;
 import github.nighter.smartspawner.spawner.utils.SpawnerTypeChecker;
+import github.nighter.smartspawner.spawner.config.SpawnerDisplayConfigurator;
 
 import org.bukkit.*;
 import org.bukkit.block.Block;
@@ -84,6 +86,7 @@ public class SpawnerPlaceListener implements Listener {
 
         EntityType storedEntityType = null;
         Material itemSpawnerMaterial = null;
+        String configName = SpawnerTypeChecker.getConfigName(item);
         
         if (blockMeta.hasBlockState() && blockMeta.getBlockState() instanceof CreatureSpawner) {
             storedEntityType = ((CreatureSpawner) blockMeta.getBlockState()).getSpawnedType();
@@ -112,12 +115,24 @@ public class SpawnerPlaceListener implements Listener {
             }
         }
 
+        // Sneak-placing a pre-stacked spawner must go through the stacking API too, otherwise
+        // addons that cancel or limit stacking via SpawnerStackEvent are bypassed. On cancel we
+        // still place a single spawner and refund the rest.
+        if (stackSize > 1 && SpawnerStackEvent.getHandlerList().getRegisteredListeners().length != 0) {
+            SpawnerStackEvent stackEvent = new SpawnerStackEvent(player, block.getLocation(), 1, stackSize,
+                    SpawnerStackEvent.StackSource.BLOCK_PLACE, storedEntityType);
+            Bukkit.getPluginManager().callEvent(stackEvent);
+            if (stackEvent.isCancelled()) {
+                stackSize = 1;
+            }
+        }
+
         if (!immediatelyConsumeItems(player, item, stackSize)) {
             event.setCancelled(true);
             return;
         }
 
-        handleSpawnerSetup(block, player, storedEntityType, isVanillaSpawner, stackSize, itemSpawnerMaterial);
+        handleSpawnerSetup(block, player, storedEntityType, isVanillaSpawner, stackSize, itemSpawnerMaterial, configName);
     }
 
     private boolean checkPlacementCooldown(Player player) {
@@ -188,8 +203,6 @@ public class SpawnerPlaceListener implements Listener {
         }
 
         if (remainingToConsume > 0) {
-            plugin.debug("Could not consume enough items for player " + player.getName() +
-                    ". Remaining: " + remainingToConsume + ", Stack size requested: " + stackSize);
             return false;
         }
 
@@ -204,7 +217,7 @@ public class SpawnerPlaceListener implements Listener {
             return 1;
         }
 
-        if (player.isSneaking()) {
+        if (player.isSneaking() && Config.get().isSneakPlaceEnabled()) {
             return Math.min(item.getAmount(), plugin.getConfig().getInt("spawner_properties.default.max_stack_size", 10000));
         } else {
             return 1;
@@ -212,7 +225,8 @@ public class SpawnerPlaceListener implements Listener {
     }
 
     private void handleSpawnerSetup(Block block, Player player, EntityType entityType,
-                                    boolean isVanillaSpawner, int stackSize, Material itemSpawnerMaterial) {
+                                    boolean isVanillaSpawner, int stackSize, Material itemSpawnerMaterial,
+                                    String configName) {
         if (entityType == null || entityType == EntityType.UNKNOWN) {
             return;
         }
@@ -235,21 +249,17 @@ public class SpawnerPlaceListener implements Listener {
             // Handle item spawners differently
             if (entityType == EntityType.ITEM && itemSpawnerMaterial != null) {
                 // Set up item spawner
-                delayedSpawner.setSpawnedType(EntityType.ITEM);
-                
-                // Create an ItemStack for the spawner to spawn
-                ItemStack spawnedItem = new ItemStack(itemSpawnerMaterial, 1);
-                delayedSpawner.setSpawnedItem(spawnedItem);
+                SpawnerDisplayConfigurator.applyItem(plugin, delayedSpawner, configName, itemSpawnerMaterial);
                 delayedSpawner.update(true, false);
                 
-                createSmartItemSpawner(block, player, itemSpawnerMaterial, stackSize);
+                createSmartItemSpawner(block, player, itemSpawnerMaterial, configName, stackSize);
             } else {
                 // Handle regular entity spawners
                 EntityType finalEntityType = getEntityType(entityType, delayedSpawner);
 
-                delayedSpawner.setSpawnedType(finalEntityType);
+                SpawnerDisplayConfigurator.applyMob(plugin, delayedSpawner, configName, finalEntityType);
                 delayedSpawner.update(true, false);
-                createSmartSpawner(block, player, finalEntityType, stackSize);
+                createSmartSpawner(block, player, finalEntityType, configName, stackSize);
             }
 
             setupHopperIntegration(block);
@@ -269,11 +279,10 @@ public class SpawnerPlaceListener implements Listener {
         return entityType;
     }
 
-    private void createSmartSpawner(Block block, Player player, EntityType entityType, int stackSize) {
+    private void createSmartSpawner(Block block, Player player, EntityType entityType, String configName, int stackSize) {
         // Check if a spawner already exists at this location (prevent duplicates/ghost spawners)
         SpawnerData existingSpawner = spawnerManager.getSpawnerByLocation(block.getLocation());
         if (existingSpawner != null) {
-            plugin.debug("Spawner already exists at " + block.getLocation() + " with ID " + existingSpawner.getSpawnerId());
             return;
         }
 
@@ -281,11 +290,11 @@ public class SpawnerPlaceListener implements Listener {
 
         BlockState state = block.getState(false);
         if (state instanceof CreatureSpawner spawner) {
-            spawner.setSpawnedType(entityType);
+            SpawnerDisplayConfigurator.applyMob(plugin, spawner, configName, entityType);
             spawner.update(true, false);
         }
 
-        SpawnerData spawner = new SpawnerData(spawnerId, block.getLocation(), entityType, plugin);
+        SpawnerData spawner = new SpawnerData(spawnerId, block.getLocation(), entityType, configName, plugin);
         spawner.setSpawnerActive(true);
         spawner.setStackSize(stackSize);
 
@@ -301,11 +310,10 @@ public class SpawnerPlaceListener implements Listener {
         messageService.sendMessage(player, "spawner_activated");
     }
 
-    private void createSmartItemSpawner(Block block, Player player, Material itemMaterial, int stackSize) {
+    private void createSmartItemSpawner(Block block, Player player, Material itemMaterial, String configName, int stackSize) {
         // Check if a spawner already exists at this location (prevent duplicates/ghost spawners)
         SpawnerData existingSpawner = spawnerManager.getSpawnerByLocation(block.getLocation());
         if (existingSpawner != null) {
-            plugin.debug("Item spawner already exists at " + block.getLocation() + " with ID " + existingSpawner.getSpawnerId());
             return;
         }
 
@@ -313,14 +321,11 @@ public class SpawnerPlaceListener implements Listener {
 
         BlockState state = block.getState(false);
         if (state instanceof CreatureSpawner spawner) {
-            spawner.setSpawnedType(EntityType.ITEM);
-            // Set the item to spawn
-            ItemStack spawnedItem = new ItemStack(itemMaterial, 1);
-            spawner.setSpawnedItem(spawnedItem);
+            SpawnerDisplayConfigurator.applyItem(plugin, spawner, configName, itemMaterial);
             spawner.update(true, false);
         }
 
-        SpawnerData spawner = new SpawnerData(spawnerId, block.getLocation(), itemMaterial, plugin);
+        SpawnerData spawner = new SpawnerData(spawnerId, block.getLocation(), itemMaterial, configName, plugin);
         spawner.setSpawnerActive(true);
         spawner.setStackSize(stackSize);
 
