@@ -6,11 +6,13 @@ import github.nighter.smartspawner.api.SmartSpawnerPlugin;
 import github.nighter.smartspawner.api.gui.ExternalGuiLayoutLoader;
 import github.nighter.smartspawner.api.gui.GuiLayoutRegistryImpl;
 import github.nighter.smartspawner.commands.BrigadierCommandManager;
+import github.nighter.smartspawner.commands.editloot.LootEditorDialogs;
+import github.nighter.smartspawner.commands.editloot.LootEditorHandler;
+import github.nighter.smartspawner.commands.editloot.LootEditorService;
+import github.nighter.smartspawner.commands.editloot.LootEditorUI;
 import github.nighter.smartspawner.commands.list.ListSubCommand;
-import github.nighter.smartspawner.commands.list.gui.adminstacker.AdminStackerHandler;
 import github.nighter.smartspawner.commands.list.gui.list.SpawnerListGUI;
 import github.nighter.smartspawner.commands.list.gui.list.UserPreferenceCache;
-import github.nighter.smartspawner.commands.list.gui.management.SpawnerManagementGUI;
 import github.nighter.smartspawner.commands.list.gui.management.SpawnerManagementHandler;
 import github.nighter.smartspawner.commands.list.gui.serverselection.ServerSelectionHandler;
 import github.nighter.smartspawner.commands.near.NearResultGUI;
@@ -21,9 +23,11 @@ import github.nighter.smartspawner.extras.HopperConfig;
 import github.nighter.smartspawner.extras.HopperService;
 import github.nighter.smartspawner.hooks.IntegrationManager;
 import github.nighter.smartspawner.hooks.economy.ItemPriceManager;
+import github.nighter.smartspawner.hooks.economy.SellIntegrationConfigUpdater;
 import github.nighter.smartspawner.hooks.economy.shops.providers.shopguiplus.SpawnerProvider;
 import github.nighter.smartspawner.language.LanguageManager;
 import github.nighter.smartspawner.language.MessageService;
+import github.nighter.smartspawner.logging.ActivityLogConfigUpdater;
 import github.nighter.smartspawner.logging.LoggingConfig;
 import github.nighter.smartspawner.logging.SpawnerActionLogger;
 import github.nighter.smartspawner.logging.SpawnerAuditListener;
@@ -31,7 +35,6 @@ import github.nighter.smartspawner.migration.SpawnerDataMigration;
 import github.nighter.smartspawner.spawner.config.ItemSpawnerSettingsConfig;
 import github.nighter.smartspawner.spawner.config.SpawnerMobHeadTexture;
 import github.nighter.smartspawner.spawner.config.SpawnerSettingsConfig;
-import github.nighter.smartspawner.spawner.data.SpawnerFileHandler;
 import github.nighter.smartspawner.spawner.data.SpawnerManager;
 import github.nighter.smartspawner.spawner.data.WorldEventHandler;
 import github.nighter.smartspawner.spawner.data.database.DatabaseManager;
@@ -43,12 +46,9 @@ import github.nighter.smartspawner.spawner.data.storage.StorageMode;
 import github.nighter.smartspawner.spawner.gui.layout.GuiLayoutConfig;
 import github.nighter.smartspawner.spawner.gui.layout.GuiButtonInteractionService;
 import github.nighter.smartspawner.spawner.gui.main.SpawnerMenuAction;
-import github.nighter.smartspawner.spawner.gui.main.SpawnerMenuFormUI;
 import github.nighter.smartspawner.spawner.gui.main.SpawnerMenuUI;
 import github.nighter.smartspawner.spawner.gui.sell.SpawnerSellConfirmListener;
 import github.nighter.smartspawner.spawner.gui.sell.SpawnerSellConfirmUI;
-import github.nighter.smartspawner.spawner.gui.stacker.SpawnerStackerHandler;
-import github.nighter.smartspawner.spawner.gui.stacker.SpawnerStackerUI;
 import github.nighter.smartspawner.spawner.gui.storage.SpawnerStorageAction;
 import github.nighter.smartspawner.spawner.gui.storage.SpawnerStorageUI;
 import github.nighter.smartspawner.spawner.gui.storage.filter.FilterConfigUI;
@@ -93,7 +93,6 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
     @Getter
     private static SmartSpawner instance;
     public final int DATA_VERSION = 3;
-    private final boolean debugMode = getConfig().getBoolean("debug", false);
 
     // Integration Manager
     private IntegrationManager integrationManager;
@@ -116,10 +115,8 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
     private GuiLayoutConfig guiLayoutConfig;
     private GuiButtonInteractionService guiButtonInteractionService;
     private SpawnerMenuUI spawnerMenuUI;
-    private SpawnerMenuFormUI spawnerMenuFormUI;
     private SpawnerStorageUI spawnerStorageUI;
     private FilterConfigUI filterConfigUI;
-    private SpawnerStackerUI spawnerStackerUI;
     private SpawnerSellConfirmUI spawnerSellConfirmUI;
 
     // Core handlers
@@ -129,13 +126,11 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
 
     // UI actions
     private SpawnerMenuAction spawnerMenuAction;
-    private SpawnerStackerHandler spawnerStackerHandler;
     private SpawnerStorageAction spawnerStorageAction;
     private SpawnerSellManager spawnerSellManager;
     private SpawnerSellConfirmListener spawnerSellConfirmListener;
 
     // Core managers
-    private SpawnerFileHandler spawnerFileHandler;
     private SpawnerStorage spawnerStorage;
     private DatabaseManager databaseManager;
     private SpawnerManager spawnerManager;
@@ -160,10 +155,15 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
     private UserPreferenceCache userPreferenceCache;
     private SpawnerListGUI spawnerListGUI;
     private SpawnerManagementHandler spawnerManagementHandler;
-    private AdminStackerHandler adminStackerHandler;
     private ServerSelectionHandler serverSelectionHandler;
     private PricesGUI pricesGUI;
-    
+
+    // In-game loot editor (/ss editloot)
+    private LootEditorService lootEditorService;
+    private LootEditorUI lootEditorUI;
+    private LootEditorDialogs lootEditorDialogs;
+    private LootEditorHandler lootEditorHandler;
+
     // Logging system
     @Getter
     private SpawnerActionLogger spawnerActionLogger;
@@ -202,7 +202,12 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         migrateDataIfNeeded();
 
         // Initialize core components
-        initializeComponents();
+        if (!initializeComponents()) {
+            getLogger().severe("SmartSpawner could not open its spawner storage and will not enable. "
+                    + "Fix the database settings in config.yml, then restart the server.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
         // Setup plugin infrastructure
         setupCommand();
@@ -231,11 +236,13 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         }
     }
 
-    private void initializeComponents() {
+    private boolean initializeComponents() {
         // Initialize services and utilities first since many components depend on them
         initializeServices();
         initializeEconomyComponents();
-        initializeCoreComponents();
+        if (!initializeCoreComponents()) {
+            return false;
+        }
         initializeHandlers();
         initializeUIAndActions();
         // Initialize hopper handler if enabled in config
@@ -243,6 +250,7 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         initializeListeners();
         this.apiImpl = new SmartSpawnerAPIImpl(this);
         this.updateChecker = new UpdateChecker(this);
+        return true;
     }
 
     private void initializeServices() {
@@ -258,7 +266,11 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         this.spawnerSettingsConfig = new SpawnerSettingsConfig(this);
         this.itemSpawnerSettingsConfig = new ItemSpawnerSettingsConfig(this);
         
-        // Initialize logging system
+        // sell_integration.yml, before ItemPriceManager reads it in initializeEconomyComponents().
+        new SellIntegrationConfigUpdater(this).checkAndUpdate();
+
+        // Initialize logging system. The updater has to run first, it owns activity_log.yml.
+        new ActivityLogConfigUpdater(this).checkAndUpdate();
         this.loggingConfig = new LoggingConfig(this);
         this.spawnerActionLogger = new SpawnerActionLogger(this, loggingConfig);
         this.spawnerAuditListener = new SpawnerAuditListener(spawnerActionLogger);
@@ -286,9 +298,11 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         this.spawnerItemFactory = new SpawnerItemFactory(this);
     }
 
-    private void initializeCoreComponents() {
+    private boolean initializeCoreComponents() {
         // Initialize storage based on configured mode
-        initializeStorage();
+        if (!initializeStorage()) {
+            return false;
+        }
 
         this.spawnerManager = new SpawnerManager(this);
         this.spawnerLocationLockManager = new SpawnerLocationLockManager(this);
@@ -306,111 +320,80 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         this.spawnerLootGenerator = new SpawnerLootGenerator(this);
         this.spawnerSellManager = new SpawnerSellManager(this);
         this.rangeChecker = new SpawnerRangeChecker(this);
-
-        // Initialize FormUI components only if Floodgate is available
-        initializeFormUIComponents();
+        return true;
     }
 
-    private void initializeStorage() {
-        String modeStr = getConfig().getString("database.mode", "YAML").toUpperCase();
-        StorageMode mode;
-        try {
-            mode = StorageMode.valueOf(modeStr);
-        } catch (IllegalArgumentException e) {
-            getLogger().warning("Invalid storage mode '" + modeStr + "', defaulting to YAML");
-            mode = StorageMode.YAML;
+    /**
+     * Brings up the configured storage backend.
+     * <p>
+     * There is deliberately no fallback. YAML storage is gone, so a backend that cannot be opened
+     * leaves the plugin with nowhere to persist spawners, and running anyway would silently discard
+     * every change on the next restart. Refusing to enable is the safe outcome.
+     *
+     * @return true when spawner storage is ready to use
+     */
+    private boolean initializeStorage() {
+        String modeStr = getConfig().getString("database.type", "SQLITE");
+        StorageMode mode = StorageMode.fromConfig(modeStr);
+        if (!mode.name().equalsIgnoreCase(modeStr == null ? "" : modeStr.trim())) {
+            getLogger().warning("Storage mode '" + modeStr + "' is not available, using " + mode + " instead.");
         }
 
-        if (mode == StorageMode.MYSQL || mode == StorageMode.SQLITE) {
-            String dbType = mode == StorageMode.MYSQL ? "MySQL/MariaDB" : "SQLite";
-            getLogger().info("Initializing " + dbType + " database storage mode...");
-            this.databaseManager = new DatabaseManager(this, mode);
+        String dbType = mode == StorageMode.MYSQL ? "MySQL/MariaDB" : "SQLite";
+        getLogger().info("Initializing " + dbType + " database storage mode...");
+        this.databaseManager = new DatabaseManager(this, mode);
 
-            if (databaseManager.initialize()) {
-                SpawnerDatabaseHandler dbHandler = new SpawnerDatabaseHandler(this, databaseManager);
-                if (dbHandler.initialize()) {
-                    this.spawnerStorage = dbHandler;
+        if (!databaseManager.initialize()) {
+            getLogger().severe("Failed to initialize the " + dbType + " connection. Spawner data cannot be loaded or saved.");
+            databaseManager.shutdown();
+            databaseManager = null;
+            return false;
+        }
 
-                    // Check if migration is enabled in config
-                    boolean migrateFromLocal = getConfig().getBoolean("database.migrate_from_local", true);
+        SpawnerDatabaseHandler dbHandler = new SpawnerDatabaseHandler(this, databaseManager);
+        if (!dbHandler.initialize()) {
+            getLogger().severe("Failed to initialize the " + dbType + " storage handler. Spawner data cannot be loaded or saved.");
+            databaseManager.shutdown();
+            databaseManager = null;
+            return false;
+        }
 
-                    if (migrateFromLocal) {
-                        // Check for YAML migration (YAML -> MySQL or YAML -> SQLite)
-                        YamlToDatabaseMigration yamlMigration = new YamlToDatabaseMigration(this, databaseManager);
-                        if (yamlMigration.needsMigration()) {
-                            getLogger().info("YAML data detected, starting migration to " + dbType + "...");
-                            if (yamlMigration.migrate()) {
-                                getLogger().info("YAML migration completed successfully!");
-                            } else {
-                                getLogger().warning("YAML migration completed with some errors. Check logs for details.");
-                            }
-                        }
+        this.spawnerStorage = dbHandler;
 
-                        // Check for SQLite to MySQL migration (only when mode is MYSQL)
-                        if (mode == StorageMode.MYSQL) {
-                            SqliteToMySqlMigration sqliteMigration = new SqliteToMySqlMigration(this, databaseManager);
-                            if (sqliteMigration.needsMigration()) {
-                                getLogger().info("SQLite data detected, starting migration to MySQL...");
-                                if (sqliteMigration.migrate()) {
-                                    getLogger().info("SQLite to MySQL migration completed successfully!");
-                                } else {
-                                    getLogger().warning("SQLite migration completed with some errors. Check logs for details.");
-                                }
-                            }
-                        }
-                    } else {
-                        debug("Local data migration is disabled in config.");
-                    }
+        // Check if migration is enabled in config
+        boolean migrateFromLocal = getConfig().getBoolean("database.migrate-from-local", true);
 
-                    getLogger().info(dbType + " database storage initialized successfully.");
+        if (migrateFromLocal) {
+            // Check for YAML migration (YAML -> MySQL or YAML -> SQLite)
+            YamlToDatabaseMigration yamlMigration = new YamlToDatabaseMigration(this, databaseManager);
+            if (yamlMigration.needsMigration()) {
+                getLogger().info("YAML data detected, starting migration to " + dbType + "...");
+                if (yamlMigration.migrate()) {
+                    getLogger().info("YAML migration completed successfully!");
                 } else {
-                    getLogger().severe("Failed to initialize database handler, falling back to YAML");
-                    databaseManager.shutdown();
-                    databaseManager = null;
-                    initializeYamlStorage();
+                    getLogger().warning("YAML migration completed with some errors. Check logs for details.");
                 }
-            } else {
-                getLogger().severe("Failed to initialize database connection, falling back to YAML");
-                databaseManager = null;
-                initializeYamlStorage();
             }
-        } else {
-            initializeYamlStorage();
-        }
-    }
 
-    private void initializeYamlStorage() {
-        this.spawnerFileHandler = new SpawnerFileHandler(this);
-        this.spawnerStorage = spawnerFileHandler;
-        getLogger().info("Using YAML file storage mode.");
-    }
-
-    private void initializeFormUIComponents() {
-        // Check if FormUI is enabled in config
-        boolean formUIEnabled = getConfig().getBoolean("bedrock_support.enable_formui", true);
-        
-        if (!formUIEnabled) {
-            this.spawnerMenuFormUI = null;
-            debug("FormUI components not initialized - disabled in config");
-            return;
-        }
-        
-        if (integrationManager != null && integrationManager.getFloodgateHook() != null 
-            && integrationManager.getFloodgateHook().isEnabled()) {
-            try {
-                this.spawnerMenuFormUI = new SpawnerMenuFormUI(this);
-                getLogger().info("FormUI components initialized successfully for Bedrock player support");
-            } catch (NoClassDefFoundError | Exception e) {
-                getLogger().warning("Failed to initialize FormUI components: " + e.getMessage());
-                this.spawnerMenuFormUI = null;
+            // Check for SQLite to MySQL migration (only when mode is MYSQL)
+            if (mode == StorageMode.MYSQL) {
+                SqliteToMySqlMigration sqliteMigration = new SqliteToMySqlMigration(this, databaseManager);
+                if (sqliteMigration.needsMigration()) {
+                    getLogger().info("SQLite data detected, starting migration to MySQL...");
+                    if (sqliteMigration.migrate()) {
+                        getLogger().info("SQLite to MySQL migration completed successfully!");
+                    } else {
+                        getLogger().warning("SQLite migration completed with some errors. Check logs for details.");
+                    }
+                }
             }
-        } else {
-            this.spawnerMenuFormUI = null;
         }
+
+        getLogger().info(dbType + " database storage initialized successfully.");
+        return true;
     }
 
     private void initializeHandlers() {
-        this.spawnerStackerUI = new SpawnerStackerUI(this);
         this.spawnEggHandler = new SpawnEggHandler(this);
         this.spawnerStackHandler = new SpawnerStackHandler(this);
         this.spawnerClickManager = new SpawnerClickManager(this);
@@ -420,7 +403,6 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
 
     private void initializeUIAndActions() {
         this.spawnerMenuAction = new SpawnerMenuAction(this);
-        this.spawnerStackerHandler = new SpawnerStackerHandler(this);
         this.spawnerStorageAction = new SpawnerStorageAction(this);
         this.spawnerSellConfirmListener = new SpawnerSellConfirmListener(this);
     }
@@ -457,13 +439,12 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         // Note: spawnerGuiViewManager registers its own listeners internally
         pm.registerEvents(spawnerClickManager, this);
         pm.registerEvents(spawnerMenuAction, this);
-        pm.registerEvents(spawnerStackerHandler, this);
         pm.registerEvents(worldEventHandler, this);
         pm.registerEvents(spawnerListGUI, this);
         pm.registerEvents(spawnerManagementHandler, this);
-        pm.registerEvents(adminStackerHandler, this);
         pm.registerEvents(serverSelectionHandler, this);
         pm.registerEvents(pricesGUI, this);
+        pm.registerEvents(lootEditorHandler, this);
         pm.registerEvents(spawnerSellConfirmListener, this);
         pm.registerEvents(guiButtonInteractionService, this);
 
@@ -482,13 +463,18 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
     }
 
     private void setupCommand() {
+        // Built before the command manager because MainCommand takes the loot editor at construction.
+        this.lootEditorService = new LootEditorService(this);
+        this.lootEditorUI = new LootEditorUI(this, lootEditorService);
+        this.lootEditorDialogs = new LootEditorDialogs(this, lootEditorService, lootEditorUI);
+        this.lootEditorHandler = new LootEditorHandler(this, lootEditorService, lootEditorUI, lootEditorDialogs);
+
         this.brigadierCommandManager = new BrigadierCommandManager(this);
         brigadierCommandManager.registerCommands();
         this.userPreferenceCache = new UserPreferenceCache(this);
         this.listSubCommand = new ListSubCommand(this);
         this.spawnerListGUI = new SpawnerListGUI(this);
         this.spawnerManagementHandler = new SpawnerManagementHandler(this, listSubCommand);
-        this.adminStackerHandler = new AdminStackerHandler(this, new SpawnerManagementGUI(this));
         this.serverSelectionHandler = new ServerSelectionHandler(this, listSubCommand);
         this.pricesGUI = new PricesGUI(this);
     }
@@ -517,7 +503,7 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
 
         // --- Storage backend ---
         metrics.addCustomChart(new SimplePie("storage_mode", () ->
-                getConfig().getString("database.mode", "YAML")));
+                getConfig().getString("database.type", "SQLITE")));
 
         // --- Language & GUI layout ---
         metrics.addCustomChart(new SimplePie("language", () ->
@@ -603,7 +589,12 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         if (itemSpawnerSettingsConfig != null) {
             itemSpawnerSettingsConfig.reload();
         }
-        
+
+        // Keep loot-editor navigation reading fresh snapshots after a full plugin reload.
+        if (lootEditorService != null) {
+            lootEditorService.reload();
+        }
+
         // Reload logging system (file logging + discord webhook)
         loggingConfig.loadConfig();
         spawnerActionLogger.reloadDiscord();
@@ -612,9 +603,6 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         if (spawnerAuditListener != null) HandlerList.unregisterAll(spawnerAuditListener);
         this.spawnerAuditListener = new SpawnerAuditListener(spawnerActionLogger);
         getServer().getPluginManager().registerEvents(spawnerAuditListener, this);
-        
-        // Reinitialize FormUI components in case config changed
-        initializeFormUIComponents();
     }
 
     @Override
@@ -667,7 +655,6 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
         if (spawnerGuiViewManager != null) spawnerGuiViewManager.cleanup();
         if (hopperService != null) hopperService.cleanup();
         if (spawnerClickManager != null) spawnerClickManager.cleanup();
-        if (spawnerStackerHandler != null) spawnerStackerHandler.cleanupAll();
         if (spawnerStorageUI != null) spawnerStorageUI.cleanup();
         if (spawnerLocationLockManager !=null) spawnerLocationLockManager.shutdown();
     }
@@ -686,11 +673,5 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
 
     public long getTimeFromConfig(String path, String defaultValue) {
         return timeFormatter.getTimeFromConfig(path, defaultValue);
-    }
-
-    public void debug(String message) {
-        if (debugMode) {
-            getLogger().info("[DEBUG] " + message);
-        }
     }
 }

@@ -1,6 +1,14 @@
 # Main Configuration
 
-The `config.yml` file is located in `plugins/SmartSpawner/`. It controls language, spawner behavior, economy, visual effects, logging, database storage, and performance.
+The `config.yml` file is located in `plugins/SmartSpawner/`. It controls language, spawner behavior, visual effects, database storage, and performance.
+
+Two areas have their own files. Selling and item prices are in `sell_integration.yml`, and action logging is in `activity_log.yml`.
+
+Most settings apply on `/ss reload`. The ones marked RESTART are only read when the server starts.
+
+Mob and Item Spawner drop tables can also be managed in game. Use `/ss edit smartspawner` or
+`/ss edit itemspawner` to edit existing entries, and `/ss add smartspawner|itemspawner` to create
+one. See [Commands](/docs/commands) for the exact syntax and permissions.
 
 Click any option or category to view additional information.
 
@@ -44,13 +52,9 @@ To add a custom language, create a new folder in <code>language/</code>, copy th
 GUI layout folder to load from <code>plugins/SmartSpawner/gui_layouts/</code>. Built-in options: <code>default</code>, <code>DonutSMP</code>, <code>DonutSMP_v2</code>.
 </ConfigProperty>
 
-<ConfigProperty name="debug" value="false" type="boolean">
-Enables extra console output for troubleshooting. Keep this <code>false</code> in production.
-</ConfigProperty>
-
 <ConfigGroup name="spawner_properties">
 <template #info>
-Controls the default behavior of all Smart Spawners. These values apply to every spawner unless overridden by per-mob settings.
+These settings apply to every Smart Spawner on the server. They control how often spawners generate, how far they reach, how much they store, and how they stack and place. Every spawner shares these values; there is no per-mob override here. Per-mob values such as XP and drop tables are set in <code>spawner_mobs.yml</code> instead. See [Mob Spawners](/docs/spawner-mobs).
 </template>
 
 <ConfigGroup name="default">
@@ -81,6 +85,14 @@ Maximum XP the spawner can store before it stops generating more.
 
 <ConfigProperty name="max_stack_size" value="10000" type="number">
 Maximum number of spawners that can be stacked into one block.
+</ConfigProperty>
+
+<ConfigProperty name="sneak_stack" value="true" type="boolean">
+When <code>true</code>, sneaking while right-clicking a spawner adds every held spawner to the stack at once. When <code>false</code>, each click adds one.
+</ConfigProperty>
+
+<ConfigProperty name="sneak_place" value="true" type="boolean">
+When <code>true</code>, sneaking while placing a spawner places the whole held stack as one spawner. When <code>false</code>, each placement adds one.
 </ConfigProperty>
 
 <ConfigProperty name="allow_exp_mending" value="true" type="boolean">
@@ -118,7 +130,7 @@ Durability points removed from the tool when a spawner is broken.
 <ConfigProperty name="sneak_break" value="true" type="boolean">
 When <code>true</code>, sneaking while breaking a stacked spawner removes up to 64 spawners at once. When <code>false</code>, sneaking has no special effect.<br><br>
 ::: warning Drop chance and sneak breaking
-If a mob type has `drop_chance` configured in `spawners_settings.yml`, sneak breaking is blocked for that spawner (one at a time only), unless the player has `smartspawner.break.bypassdropchance`.
+If a mob type has `drop_chance` configured in `spawner_mobs.yml`, sneak breaking is blocked for that spawner (one at a time only), unless the player has `smartspawner.break.bypassdropchance`.
 :::
 </ConfigProperty>
 
@@ -174,60 +186,6 @@ Protects natural spawner blocks from explosions.
 
 </ConfigGroup>
 
-<ConfigGroup name="sell_integration">
-<template #info>
-Configures the economy and shop integration used by the spawner storage sell button.
-</template>
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Enables selling items from spawner storage. Set to <code>false</code> to disable all sell functionality.
-</ConfigProperty>
-
-<ConfigProperty name="currency" value="VAULT" type="string">
-Economy backend. Supported values: <code>VAULT</code>, <code>EXCELLENTECONOMY</code>.
-</ConfigProperty>
-
-<ConfigProperty name="excellenteconomy_currency" value="coins" type="string">
-ExcellentEconomy currency name. Only used when <code>currency</code> is <code>EXCELLENTECONOMY</code>.
-</ConfigProperty>
-
-<ConfigProperty name="price_source_mode" value="SHOP_PRIORITY" type="string">
-Determines where sell prices come from.<br><br>
-
-| Mode | Behavior |
-|------|----------|
-| <code>SHOP_ONLY</code> | Uses only shop plugin prices. Custom prices ignored. |
-| <code>SHOP_PRIORITY</code> | Shop prices first, then custom prices as fallback. Recommended. |
-| <code>CUSTOM_ONLY</code> | Uses only prices from <code>item_prices.yml</code>. |
-| <code>CUSTOM_PRIORITY</code> | Custom prices first, then shop prices as fallback. |
-
-</ConfigProperty>
-
-<ConfigGroup name="shop_integration">
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Enables shop plugin price lookup.
-</ConfigProperty>
-
-<ConfigProperty name="preferred_plugin" value="auto" type="string">
-Specify a shop plugin to use: <code>auto</code>, <code>EconomyShopGUI</code>, <code>EconomyShopGUI-Premium</code>, <code>ShopGUIPlus</code>, or <code>zShop</code>.
-</ConfigProperty>
-
-</ConfigGroup>
-
-<ConfigGroup name="custom_prices">
-
-<ConfigProperty name="enabled" value="true" type="boolean">
-Enables custom prices from <code>item_prices.yml</code>.
-</ConfigProperty>
-
-<ConfigProperty name="default_price" value="1.0" type="number">
-Fallback price for items without an explicit custom price. Set to <code>0.0</code> to prevent selling unconfigured items.
-</ConfigProperty>
-
-</ConfigGroup>
-</ConfigGroup>
-
 <ConfigGroup name="hopper">
 <template #info>
 Controls automatic item transfer from spawner storage through hoppers placed below the spawner.
@@ -243,14 +201,6 @@ Time between hopper transfer checks.
 
 <ConfigProperty name="stack_per_transfer" value="5" type="number">
 Number of item stacks transferred per cycle (up to 5).
-</ConfigProperty>
-
-</ConfigGroup>
-
-<ConfigGroup name="bedrock_support">
-
-<ConfigProperty name="enable_formui" value="true" type="boolean">
-Shows mobile-friendly form menus to Bedrock players (via Floodgate/Geyser) instead of chest GUIs.
 </ConfigProperty>
 
 </ConfigGroup>
@@ -297,43 +247,69 @@ Optional particle effects for spawner events.
 
 </ConfigGroup>
 
-<ConfigGroup name="logging">
-<template #info>
-Logs spawner actions to rotating log files for auditing and debugging.
-</template>
-
-<ConfigProperty name="enabled" value="true" type="boolean">Enables file logging for spawner actions.</ConfigProperty>
-<ConfigProperty name="json_format" value="false" type="boolean">If <code>true</code>, logs are written as JSON. Otherwise human-readable text.</ConfigProperty>
-<ConfigProperty name="console_output" value="false" type="boolean">Also print log entries to the server console.</ConfigProperty>
-<ConfigProperty name="max_log_files" value="10" type="number">Number of rotated log files to keep.</ConfigProperty>
-<ConfigProperty name="max_log_size_mb" value="10" type="number">Maximum size of each log file before rotation.</ConfigProperty>
-<ConfigProperty name="log_all_events" value="false" type="boolean">If <code>true</code>, logs every supported event and ignores the <code>logged_events</code> list.</ConfigProperty>
-
-<ConfigProperty name="logged_events" :value="['SPAWNER_PLACE', 'SPAWNER_BREAK', 'SPAWNER_STACK_HAND', 'SPAWNER_SELL_ALL', 'COMMAND_EXECUTE_PLAYER']" type="list">
-Events to log when <code>log_all_events</code> is <code>false</code>. See the table below for all available events.
-</ConfigProperty>
-
-</ConfigGroup>
-
 <ConfigGroup name="database">
 <template #info>
-Configures where spawner data is stored.
+Configures where spawner data is stored. See <a href="/docs/database-support">Database Support</a> for a full walkthrough.
+
+::: warning RESTART
+Every setting in this section except <code>autosave-interval</code> is only read when the server starts. <code>/ss reload</code> does not apply them.
+:::
 </template>
 
-<ConfigProperty name="mode" value="YAML" type="string">
-Storage backend. Supported values: <code>YAML</code>, <code>SQLITE</code>, <code>MYSQL</code>.
+<ConfigProperty name="type" value="SQLITE" type="string">
+Storage backend. Supported values: <code>SQLITE</code>, <code>MYSQL</code>. A config still set to <code>YAML</code> switches to <code>SQLITE</code> on the next start and imports the old file once.
 </ConfigProperty>
 
-<ConfigProperty name="server_name" value="server1" type="string">
+<ConfigProperty name="table-prefix" value="sspawner_" type="string">
+Prefix for the two tables this plugin creates, <code>sspawner_data</code> and <code>sspawner_schema_meta</code>. Only letters, digits and underscore are kept, anything else is removed. Change it when another plugin already uses those names in the same database, or to keep two SmartSpawner installs apart in one MySQL database.
+
+Existing tables are renamed automatically when this value changes.
+</ConfigProperty>
+
+<ConfigProperty name="autosave-interval" value="3m" type="string">
+How often unsaved spawner changes are written to the database. Accepts the time format described above, with a minimum of <code>30s</code>. Spawner data is also saved when the world saves and when the server stops, so this is a safety net rather than the only save.
+
+Raise it on a busy server to cut disk writes. Lower it to shorten how much recent activity a server crash could lose. This is the only setting in this section that <code>/ss reload</code> applies.
+</ConfigProperty>
+
+<ConfigProperty name="sqlite-file" value="spawners.db" type="string">
+Database file name, stored in <code>plugins/SmartSpawner/</code>. Used in <code>SQLITE</code> mode only.
+</ConfigProperty>
+
+<ConfigProperty name="host" value="localhost" type="string">
+Database server address. Used in <code>MYSQL</code> mode only, like the five options below it.
+</ConfigProperty>
+
+<ConfigProperty name="port" value="3306" type="number">
+Database server port.
+</ConfigProperty>
+
+<ConfigProperty name="database" value="smartspawner" type="string">
+Name of the MySQL or MariaDB database to use.
+</ConfigProperty>
+
+<ConfigProperty name="username" value="root" type="string">
+Database user.
+</ConfigProperty>
+
+<ConfigProperty name="password" value="" type="string">
+Password for that user.
+</ConfigProperty>
+
+<ConfigProperty name="pool-size" value="10" type="number">
+Largest number of database connections the plugin may open at once. The defaults suit most servers. SQLite runs in WAL mode, so reads are not blocked while a save runs.
+</ConfigProperty>
+
+<ConfigProperty name="server-name" value="server1" type="string">
 Unique server name used for cross-server MySQL setups.
 </ConfigProperty>
 
-<ConfigProperty name="sync_across_servers" value="false" type="boolean">
+<ConfigProperty name="sync-across-servers" value="false" type="boolean">
 Shows a server selection page in <code>/ss list</code> to view spawners from all servers sharing a MySQL database. Only available in <code>MYSQL</code> mode.
 </ConfigProperty>
 
-<ConfigProperty name="migrate_from_local" value="true" type="boolean">
-Automatically migrates local data on startup when switching database modes. Migrated files are renamed with a <code>.migrated</code> suffix.
+<ConfigProperty name="migrate-from-local" value="true" type="boolean">
+Automatically migrates local data on startup when switching database modes. Migrated files are renamed with a <code>.migrated</code> suffix so nothing is imported twice.
 </ConfigProperty>
 
 </ConfigGroup>
@@ -360,28 +336,3 @@ Controls when approximation starts (when <code>approximate_loot</code> is <code>
 </ConfigGroup>
 
 </div>
-
-## Available Log Events
-
-| Event | Description |
-|-------|-------------|
-| `SPAWNER_PLACE` | Spawner placed by a player |
-| `SPAWNER_BREAK` | Spawner broken by a player |
-| `SPAWNER_EXPLODE` | Spawner destroyed by an explosion |
-| `SPAWNER_STACK_HAND` | Spawner stacked by hand |
-| `SPAWNER_STACK_GUI` | Spawner stacked via GUI |
-| `SPAWNER_DESTACK_GUI` | Spawner destacked via GUI |
-| `SPAWNER_GUI_OPEN` | Main spawner GUI opened |
-| `SPAWNER_STORAGE_OPEN` | Storage GUI opened |
-| `SPAWNER_STACKER_OPEN` | Stacker GUI opened |
-| `SPAWNER_EXP_CLAIM` | XP claimed from spawner |
-| `SPAWNER_SELL_ALL` | Items sold from storage |
-| `SPAWNER_ITEM_TAKE_ALL` | All items taken from storage |
-| `SPAWNER_ITEM_DROP` | Item dropped with the drop key |
-| `SPAWNER_ITEMS_SORT` | Items sorted in storage |
-| `SPAWNER_ITEM_FILTER` | Item filter toggled |
-| `SPAWNER_DROP_PAGE_ITEMS` | All items on current page dropped |
-| `SPAWNER_EGG_CHANGE` | Mob type changed with spawn egg |
-| `COMMAND_EXECUTE_PLAYER` | Command run by a player |
-| `COMMAND_EXECUTE_CONSOLE` | Command run by console |
-| `COMMAND_EXECUTE_RCON` | Command run via RCON |

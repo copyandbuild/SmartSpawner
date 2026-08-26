@@ -35,7 +35,6 @@ public class SpawnerDataMigration {
         File dataFile = new File(dataFolder, DATA_FILE);
 
         if (!dataFile.exists()) {
-            plugin.getLogger().info("Data file does not exist. No migration needed.");
             return false;
         }
 

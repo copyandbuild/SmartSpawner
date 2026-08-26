@@ -33,7 +33,9 @@ public class ShopIntegrationManager {
 
     private void detectAndRegisterActiveProviders() {
         // Check configuration for preferred plugin first
-        String configuredShop = plugin.getConfig().getString("sell_integration.shop_integration.preferred_plugin", "auto");
+        // sell_integration.yml, held by ItemPriceManager, which builds this class.
+        String configuredShop = plugin.getItemPriceManager().getSellConfig()
+                .getString("shop_integration.preferred_plugin", "auto");
         boolean autoDetect = "auto".equalsIgnoreCase(configuredShop);
 
         // If a specific shop is configured, only try to load that one
@@ -72,7 +74,6 @@ public class ShopIntegrationManager {
                         spawnerHook = new SpawnerHook(plugin);
                         plugin.getServer().getPluginManager().registerEvents(spawnerHook, plugin);
                     } catch (Exception e) {
-                        plugin.debug("Failed to register SpawnerHook: " + e.getMessage());
                         throw e; // Re-throw to prevent provider registration
                     }
                 }
@@ -112,7 +113,6 @@ public class ShopIntegrationManager {
                             if (spawnerHook == null) {
                                 spawnerHook = new SpawnerHook(plugin);
                                 plugin.getServer().getPluginManager().registerEvents(spawnerHook, plugin);
-                                plugin.debug("Registered SpawnerHook event listener for ShopGUIPlus");
                             }
                             return new ShopGuiPlusProvider(plugin);
                         });
@@ -127,7 +127,7 @@ public class ShopIntegrationManager {
                     break;
             }
         } catch (Exception e) {
-            plugin.debug("Failed to load specific provider " + providerName + ": " + e.getMessage());
+            // Provider could not be loaded; treat it as unavailable.
         }
         return false;
     }
@@ -140,8 +140,7 @@ public class ShopIntegrationManager {
     private void registerProviderIfAvailable(String providerName, Supplier<ShopProvider> providerSupplier) {
         // If we already have an active provider and we're in single-provider mode, skip
         if (!availableProviders.isEmpty()) {
-            plugin.debug("Skipping " + providerName + " registration - already have active provider: " +
-                    availableProviders.getFirst().getPluginName());
+            // Already have an active provider; single-provider mode, so skip.
             return;
         }
 
@@ -151,9 +150,9 @@ public class ShopIntegrationManager {
                 availableProviders.add(provider);
             }
         } catch (NoClassDefFoundError e) {
-            plugin.debug("Shop provider " + providerName + " classes not found (plugin not installed): " + e.getMessage());
+            // Provider classes not present (plugin not installed); ignore.
         } catch (Exception e) {
-            plugin.debug("Failed to initialize shop provider " + providerName + ": " + e.getMessage());
+            // Provider could not be initialized; ignore.
         }
     }
 
@@ -176,7 +175,6 @@ public class ShopIntegrationManager {
         try {
             return activeProvider.getSellPrice(material);
         } catch (Exception e) {
-            plugin.debug("Error getting price for " + material + " from " + activeProvider.getPluginName() + ": " + e.getMessage());
             return 0.0;
         }
     }

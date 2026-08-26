@@ -90,23 +90,18 @@ public class ListSubCommand extends BaseSubCommand {
      * (SQLite is local-only and does not support cross-server sync)
      */
     public boolean isCrossServerEnabled() {
-        String modeStr = plugin.getConfig().getString("database.mode", "YAML").toUpperCase();
-        try {
-            StorageMode mode = StorageMode.valueOf(modeStr);
-            if (mode != StorageMode.MYSQL) {
-                return false;
-            }
-        } catch (IllegalArgumentException e) {
+        StorageMode mode = StorageMode.fromConfig(plugin.getConfig().getString("database.type"));
+        if (mode != StorageMode.MYSQL) {
             return false;
         }
-        return plugin.getConfig().getBoolean("database.sync_across_servers", false);
+        return plugin.getConfig().getBoolean("database.sync-across-servers", false);
     }
 
     /**
      * Get the current server name from config.
      */
     public String getCurrentServerName() {
-        return plugin.getConfig().getString("database.server_name", "server1");
+        return plugin.getConfig().getString("database.server-name", "server1");
     }
 
     /**

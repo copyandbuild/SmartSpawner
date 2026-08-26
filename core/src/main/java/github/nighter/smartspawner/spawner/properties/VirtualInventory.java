@@ -74,6 +74,15 @@ public class VirtualInventory {
             sortedEntriesCache = null;
         }
     }
+    /**
+     * Adds an already-consolidated entry: one item template plus its total count.
+     *
+     * @param template the item template, its own amount is ignored
+     * @param amount   how many of that item are stored, ignored when not positive
+     */
+    public void addConsolidatedItem(ItemStack template, long amount) {
+        addItem(template, amount);
+    }
 
     public boolean removeItems(Map<ItemSignature, Long> items) {
         if (items == null || items.isEmpty()) {

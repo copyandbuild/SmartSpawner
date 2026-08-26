@@ -6,7 +6,7 @@ Trước khi cài SmartSpawner, hãy đảm bảo máy chủ đáp ứng:
 
 | Yêu cầu | Thông số |
 |---------|----------|
-| **Phiên bản Minecraft** | 1.21.5+ |
+| **Phiên bản Minecraft** | 1.21.6+ |
 | **Phần mềm máy chủ** | [Paper](https://papermc.io/downloads/paper), [Folia](https://papermc.io/downloads/folia), [Purpur](https://purpurmc.org/) hoặc fork tương thích |
 | **Phiên bản Java** | Java 25+ |
 
@@ -55,10 +55,11 @@ Plugin tự tạo file trong `plugins/SmartSpawner/`:
 | File | Mô tả |
 |------|-------|
 | `config.yml` | Cấu hình chính: hành vi spawner, kinh tế, hiệu ứng |
-| `spawners_settings.yml` | Bảng vật phẩm và XP cho từng loại mob |
-| `item_spawners_settings.yml` | Bảng vật phẩm cho Item Spawner |
-| `item_prices.yml` | Giá bán vật phẩm tùy chỉnh |
-| `spawners_data.yml` | Dữ liệu spawner lâu dài ở chế độ YAML |
+| `spawner_mobs.yml` | Bảng vật phẩm và XP cho từng loại mob |
+| `spawner_items.yml` | Bảng vật phẩm cho Item Spawner |
+| `sell_integration.yml` | Kinh tế, tích hợp cửa hàng và giá bán tùy chỉnh |
+| `activity_log.yml` | Ghi nhật ký thao tác ra file và Discord |
+| `spawners.db` | Dữ liệu spawner lâu dài ở chế độ SQLite |
 | `language/` | Thư mục ngôn ngữ và thông báo có thể dịch |
 | `gui_layouts/` | Thư mục bố cục GUI |
 | `auraskills.yml` | Thiết lập AuraSkills nếu plugin này được cài |
