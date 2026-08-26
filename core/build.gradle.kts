@@ -127,7 +127,15 @@ tasks.shadowJar {
     relocate("org.mariadb.jdbc", "github.nighter.smartspawner.libs.mariadb")
     relocate("org.bstats", project.group.toString())
     mergeServiceFiles()
-    destinationDirectory.set(file("C:\\Users\\Admin\\Desktop\\TestServer\\plugins"))
+    // Defaults to the standard build/libs output. To also drop the jar straight into a
+    // local test server (like the original author's setup did), set `pluginTestDir` in
+    // your own (gitignored) gradle.properties, e.g.:
+    //   pluginTestDir=C:\\Users\\you\\Desktop\\TestServer\\plugins
+    destinationDirectory.set(
+        (project.findProperty("pluginTestDir") as String?)
+            ?.let { file(it) }
+            ?: layout.buildDirectory.dir("libs").get().asFile
+    )
 }
 
 tasks.build {
