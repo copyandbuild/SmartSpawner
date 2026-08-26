@@ -86,3 +86,6 @@ javac.*.args
 ## run-paper test server
 ##############################
 run/
+
+# Fork: converted AxSpawners data (not for upstream)
+nv_spawners_data.yml

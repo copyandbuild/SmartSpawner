@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import github.nighter.smartspawner.fork.ForkGuard;
 
 public class SpawnerRangeChecker {
     private static final long CHECK_INTERVAL = 20L; // 1 second in ticks
@@ -79,7 +80,8 @@ public class SpawnerRangeChecker {
         for (Player p : onlinePlayers) {
 
             boolean conditions = p.isConnected() && !p.isDead()
-                    && p.getGameMode() != GameMode.SPECTATOR;
+                    && p.getGameMode() != GameMode.SPECTATOR
+                    && ForkGuard.countsAsActive(p); // [fork]
 
             // Store data in wrapper for faster access
             rangePlayers[i++] = new PlayerRangeWrapper(p.getWorld().getUID(),

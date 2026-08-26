@@ -28,6 +28,11 @@ public class SpawnerLootGenerator {
     }
 
     public void spawnLootToSpawner(SpawnerData spawner) {
+        // [fork]
+        if (!github.nighter.smartspawner.fork.ForkGuard.canGenerate(spawner.getSpawnerLocation())) {
+            return;
+        }
+
         // Skip loot generation while a sell is in progress to avoid inventory conflicts
         if (spawner.isSelling()) {
             return;

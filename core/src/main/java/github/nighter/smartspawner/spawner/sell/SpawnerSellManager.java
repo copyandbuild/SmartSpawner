@@ -15,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
+import github.nighter.smartspawner.fork.ForkGuard;
 
 
 public class SpawnerSellManager {
@@ -68,6 +69,13 @@ public class SpawnerSellManager {
      * @param expMending   amount of exp consumed by Mending (out of expCollected). Pass 0 if none.
      */
     public void sellAllItems(Player player, SpawnerData spawner, Runnable onComplete, long expCollected, long expMending) {
+        // [fork]
+        if (!ForkGuard.canSell(player, spawner.getSpawnerLocation())) {
+            messageService.sendMessage(player, "spawner_protected");
+            if (onComplete != null) onComplete.run();
+            return;
+        }
+
         // Single atomic guard – prevents race conditions and double-sell exploits
         if (!spawner.startSelling()) {
             messageService.sendMessage(player, "action_in_progress");

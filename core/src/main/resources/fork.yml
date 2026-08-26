@@ -19,3 +19,52 @@ natural_spawner:
     # Nur in diesen Welten darf gedroppt werden. Gross-/Kleinschreibung egal.
     worlds:
       - "Plotwelt"
+
+# ---------------------------------------------------------------------
+#  AFK-Schutz (ersetzt das externe Plugin NuviraMCSpawner)
+#  Braucht EssentialsX. Ohne Essentials passiert nichts.
+# ---------------------------------------------------------------------
+afk:
+
+  # AFK-Spieler zaehlen nicht mehr als "Spieler in Reichweite".
+  # Steht nur ein AFK-Spieler beim Spawner, stoppt die Loot-Generierung.
+  ignore_players_for_generation: true
+
+  # Verkauf aus der Spawner-GUI blockieren, solange der Spieler AFK ist.
+  block_sell: true
+
+# ---------------------------------------------------------------------
+#  WorldGuard-Flags
+#  Alle Flags haben Default ALLOW -- ungesetzt verhaelt sich der Server
+#  exakt wie Upstream. Setzen z.B. mit:
+#     /rg flag <region> smartspawner-generate deny
+#     /rg flag <region> smartspawner-use allow -g members
+#
+#  Verfuegbare Flags:
+#     smartspawner-use       Spawner-GUI oeffnen
+#     smartspawner-place     Spawner setzen
+#     smartspawner-break     Spawner abbauen
+#     smartspawner-stack     Spawner stapeln
+#     smartspawner-sell      Aus der Spawner-GUI verkaufen
+#     smartspawner-generate  Spieler in dieser Region halten ihre Spawner am
+#                            Laufen. Auf "deny" gesetzt generieren die Spawner
+#                            eines Spielers nichts mehr, solange er in dieser
+#                            Region steht (z.B. Spawn, AFK-Bereich, Farmwelt).
+#                            Geprueft wird die Position des SPIELERS, nicht die
+#                            des Spawners.
+# ---------------------------------------------------------------------
+worldguard:
+
+  # false = Flags werden ignoriert, auch wenn sie in Regionen gesetzt sind.
+  flags_enabled: true
+
+# ---------------------------------------------------------------------
+#  Harte Bedingungen fuer die Loot-Generierung
+# ---------------------------------------------------------------------
+generation:
+
+  # Kein Loot, solange kein Spieler online ist.
+  require_player_online: true
+
+  # Kein Loot, solange der Chunk des Spawners nicht geladen ist.
+  require_chunk_loaded: true

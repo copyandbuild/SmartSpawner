@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import github.nighter.smartspawner.fork.ForkGuard;
 
 public class SpawnerStackHandler {
     private static final long STACK_COOLDOWN = 250L; // 250ms cooldown between stacks
@@ -164,6 +165,12 @@ public class SpawnerStackHandler {
     }
 
     private boolean hasStackPermissions(Player player, Location location) {
+        // [fork]
+        if (!ForkGuard.canStack(player, location)) {
+            messageService.sendMessage(player, "spawner_protected");
+            return false;
+        }
+
         if (!CheckStackBlock.CanPlayerPlaceBlock(player, location)) {
             messageService.sendMessage(player, "spawner_protected");
             return false;

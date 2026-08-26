@@ -34,6 +34,13 @@ public final class ForkConfig {
     private boolean worldFilterEnabled;
     private Set<String> allowedWorlds = Set.of();
 
+    private boolean ignoreAfkPlayers;
+    private boolean blockSellWhileAfk;
+
+    private boolean worldGuardFlagsEnabled;
+    private boolean requirePlayerOnline;
+    private boolean requireChunkLoaded;
+
     private ForkConfig(JavaPlugin plugin) {
         this.plugin = plugin;
         reload();
@@ -83,6 +90,14 @@ public final class ForkConfig {
             }
         }
         this.allowedWorlds = Set.copyOf(normalized);
+
+        this.ignoreAfkPlayers = cfg.getBoolean("afk.ignore_players_for_generation", false);
+        this.blockSellWhileAfk = cfg.getBoolean("afk.block_sell", false);
+
+        this.worldGuardFlagsEnabled = cfg.getBoolean("worldguard.flags_enabled", true);
+
+        this.requirePlayerOnline = cfg.getBoolean("generation.require_player_online", false);
+        this.requireChunkLoaded = cfg.getBoolean("generation.require_chunk_loaded", false);
     }
 
     /**
@@ -103,5 +118,30 @@ public final class ForkConfig {
             return false;
         }
         return allowedWorlds.contains(world.getName().toLowerCase(Locale.ROOT));
+    }
+
+    /** AFK players should not keep spawners generating. */
+    public boolean isIgnoreAfkPlayers() {
+        return ignoreAfkPlayers;
+    }
+
+    /** Selling from the spawner GUI is blocked while the player is AFK. */
+    public boolean isBlockSellWhileAfk() {
+        return blockSellWhileAfk;
+    }
+
+    /** No loot while nobody is online. */
+    public boolean isRequirePlayerOnline() {
+        return requirePlayerOnline;
+    }
+
+    /** No loot while the spawner chunk is unloaded. */
+    public boolean isRequireChunkLoaded() {
+        return requireChunkLoaded;
+    }
+
+    /** Master switch for the fork-only WorldGuard flags. */
+    public boolean isWorldGuardFlagsEnabled() {
+        return worldGuardFlagsEnabled;
     }
 }

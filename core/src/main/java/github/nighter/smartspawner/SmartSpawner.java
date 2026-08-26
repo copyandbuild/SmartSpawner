@@ -84,6 +84,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
+import github.nighter.smartspawner.fork.ForkConfig;
+import github.nighter.smartspawner.fork.ForkFlags;
 
 @Getter
 @Accessors(chain = false)
@@ -174,6 +176,17 @@ public class SmartSpawner extends JavaPlugin implements SmartSpawnerPlugin {
 
     // API implementation
     private SmartSpawnerAPIImpl apiImpl;
+
+    @Override
+    public void onLoad() {
+        // [fork] WorldGuard verlangt Flag-Registrierung vor dem Enable von WorldGuard
+        try {
+            ForkFlags.register();
+            ForkConfig.get();
+        } catch (Throwable throwable) {
+            getLogger().warning("[fork] init failed: " + throwable);
+        }
+    }
 
     @Override
     public void onEnable() {
