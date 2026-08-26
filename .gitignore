@@ -90,3 +90,4 @@ run/
 
 # Fork: converted AxSpawners data (not for upstream)
 nv_spawners_data.yml
+_to_delete/
